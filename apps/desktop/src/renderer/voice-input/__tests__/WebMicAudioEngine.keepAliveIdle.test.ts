@@ -6,6 +6,8 @@ import * as pool from '../audioContextPool';
 vi.mock('../audioContextPool', () => ({
   PCM16K_WORKLET_NAME: 'pcm16k-worklet',
   prewarmVoiceInputAudio: vi.fn(),
+  retainSharedVoiceInputAudio: vi.fn(() => vi.fn()),
+  suspendSharedVoiceInputAudioNow: vi.fn(async () => undefined),
 }));
 
 type PowerCallback = (payload: { reason: 'system_suspend' | 'screen_locked' }) => void;

@@ -1,6 +1,8 @@
 import type { AudioTrace } from '@cindy/voice-input-core';
 
-import { PCM16K_WORKLET_NAME, prewarmVoiceInputAudio } from './audioContextPool';
+import * as audioContextPool from './audioContextPool';
+
+const { PCM16K_WORKLET_NAME } = audioContextPool;
 
 export type PcmChunk = {
   pcm16k: ArrayBuffer;
@@ -174,7 +176,9 @@ export function disposeVoiceInputAudioModuleForHmr(): Promise<void> {
   // the swap, and the new module instance has an empty registry — so without
   // this the old direct stream stays live with nothing able to reach it.
   releaseDirectCaptureEngines('hmr');
-  return disposeKeepAliveVoiceInputMicrophone('hmr');
+  return disposeKeepAliveVoiceInputMicrophone('hmr').finally(() => {
+    void audioContextPool.suspendSharedVoiceInputAudioNow?.();
+  });
 }
 
 export function isPowerReleaseCancellation(error: unknown): boolean {
@@ -423,7 +427,9 @@ function ensureKeepAlivePowerReleaseListener(): void {
   keepAlivePowerReleaseUnsubscribe = subscribe((payload) => {
     powerReleaseGeneration += 1;
     releaseDirectCaptureEngines(payload.reason);
-    void disposeKeepAliveVoiceInputMicrophone(payload.reason);
+    void disposeKeepAliveVoiceInputMicrophone(payload.reason).finally(() => {
+      void audioContextPool.suspendSharedVoiceInputAudioNow?.();
+    });
     // Suspend / lock means the user walked away, so the fast-activation window
     // ends here as well: coming back half an hour later must not relight the
     // microphone from a stale "last use", and stop() triggered by this release
@@ -455,6 +461,7 @@ class KeepAliveMicSession {
   // session, and a flag would let whichever finishes first clear the other's
   // claim — handing the still-live session to a replacing prewarm.
   private recordingReservations = 0;
+  private releaseSharedAudioLease?: (options?: { immediate?: boolean }) => void;
 
   constructor(options: KeepAliveSessionOptions) {
     this.options = options;
@@ -508,66 +515,75 @@ class KeepAliveMicSession {
   private async startInternal(): Promise<void> {
     ensureKeepAliveDeviceChangeListener();
     ensureKeepAlivePowerReleaseListener();
-    // A release (suspend/lock/setting off) can land while this is pending, in
-    // which case bailing out avoids opening a device nothing could then close.
-    const sharedState = await this.awaitStartupStep(prewarmVoiceInputAudio(this.options.workletUrl));
-    this.context = sharedState.context;
-    let stream: MediaStream;
+    this.releaseSharedAudioLease ??= audioContextPool.retainSharedVoiceInputAudio?.();
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: buildMediaConstraints(this.options),
-        video: false,
+      // A release (suspend/lock/setting off) can land while this is pending, in
+      // which case bailing out avoids opening a device nothing could then close.
+      const sharedState = await this.awaitStartupStep(
+        audioContextPool.prewarmVoiceInputAudio(this.options.workletUrl),
+      );
+      this.context = sharedState.context;
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: buildMediaConstraints(this.options),
+          video: false,
+        });
+      } catch (error) {
+        // A release that won this race takes priority over the device error.
+        // Suspending a machine commonly makes the pending getUserMedia reject
+        // (AbortError / NotReadableError); reporting that as an ordinary failure
+        // sends start() down the cold fallback path, which reopens the microphone
+        // after the suspend/lock event has already passed — with nothing left to
+        // close it.
+        if (this.disposed) throw new KeepAliveSessionDisposedError(this.disposedReason);
+        throw normalizeMicrophoneStartError(error, this.options.deviceId);
+      }
+      // dispose() ran while getUserMedia was in flight: it could not stop a track
+      // that did not exist yet, so this stream would stay live forever — mic
+      // indicator on, idle-sleep assertion held, and unreachable from any session.
+      if (this.disposed) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new KeepAliveSessionDisposedError(this.disposedReason);
+      }
+      this.stream = stream;
+      this.stream.getAudioTracks().forEach((track) => this.watchTrack(track));
+      this.sink = this.context.createGain();
+      this.sink.gain.value = 0;
+      this.source = this.context.createMediaStreamSource(this.stream);
+      this.worklet = new AudioWorkletNode(this.context, PCM16K_WORKLET_NAME, {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
       });
+      this.worklet.port.onmessage = (event: MessageEvent<WorkletPcmMessage>) => {
+        if (event.data?.type !== 'pcm16k') return;
+        this.activation?.callback({
+          pcm16k: event.data.pcm16k,
+          trace: event.data.trace,
+        });
+      };
+      this.worklet.port.postMessage({
+        type: 'config',
+        targetSampleRate: this.options.targetSampleRate,
+        chunkMs: this.options.chunkMs,
+        timeOriginMs: Date.now() - this.context.currentTime * 1000,
+      });
+      this.worklet.port.postMessage({ type: 'setActive', active: false, reset: true });
+      this.source.connect(this.worklet);
+      this.worklet.connect(this.sink);
+      // The sink stays detached until activation; see attachOutputPath.
+      if (this.context.state !== 'running') {
+        // Last await of startup. A release landing here has already stopped the
+        // track and torn down every node built above, so reporting success would
+        // hand the caller a session that can never emit PCM — it would arm its
+        // watchdog and surface a bogus "microphone stalled" failure instead.
+        await this.awaitStartupStep(this.context.resume());
+      }
     } catch (error) {
-      // A release that won this race takes priority over the device error.
-      // Suspending a machine commonly makes the pending getUserMedia reject
-      // (AbortError / NotReadableError); reporting that as an ordinary failure
-      // sends start() down the cold fallback path, which reopens the microphone
-      // after the suspend/lock event has already passed — with nothing left to
-      // close it.
-      if (this.disposed) throw new KeepAliveSessionDisposedError(this.disposedReason);
-      throw normalizeMicrophoneStartError(error, this.options.deviceId);
-    }
-    // dispose() ran while getUserMedia was in flight: it could not stop a track
-    // that did not exist yet, so this stream would stay live forever — mic
-    // indicator on, idle-sleep assertion held, and unreachable from any session.
-    if (this.disposed) {
-      stream.getTracks().forEach((track) => track.stop());
-      throw new KeepAliveSessionDisposedError(this.disposedReason);
-    }
-    this.stream = stream;
-    this.stream.getAudioTracks().forEach((track) => this.watchTrack(track));
-    this.sink = this.context.createGain();
-    this.sink.gain.value = 0;
-    this.source = this.context.createMediaStreamSource(this.stream);
-    this.worklet = new AudioWorkletNode(this.context, PCM16K_WORKLET_NAME, {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    });
-    this.worklet.port.onmessage = (event: MessageEvent<WorkletPcmMessage>) => {
-      if (event.data?.type !== 'pcm16k') return;
-      this.activation?.callback({
-        pcm16k: event.data.pcm16k,
-        trace: event.data.trace,
-      });
-    };
-    this.worklet.port.postMessage({
-      type: 'config',
-      targetSampleRate: this.options.targetSampleRate,
-      chunkMs: this.options.chunkMs,
-      timeOriginMs: Date.now() - this.context.currentTime * 1000,
-    });
-    this.worklet.port.postMessage({ type: 'setActive', active: false, reset: true });
-    this.source.connect(this.worklet);
-    this.worklet.connect(this.sink);
-    // The sink stays detached until activation; see attachOutputPath.
-    if (this.context.state !== 'running') {
-      // Last await of startup. A release landing here has already stopped the
-      // track and torn down every node built above, so reporting success would
-      // hand the caller a session that can never emit PCM — it would arm its
-      // watchdog and surface a bogus "microphone stalled" failure instead.
-      await this.awaitStartupStep(this.context.resume());
+      this.releaseSharedAudioLease?.({ immediate: true });
+      this.releaseSharedAudioLease = undefined;
+      throw error;
     }
   }
 
@@ -731,6 +747,8 @@ class KeepAliveMicSession {
     this.sink = undefined;
     this.source = undefined;
     this.stream = undefined;
+    this.releaseSharedAudioLease?.({ immediate: true });
+    this.releaseSharedAudioLease = undefined;
   }
 
   private watchTrack(track: MediaStreamTrack): void {
@@ -1128,6 +1146,7 @@ export class WebMicAudioEngine {
   // recorded as a fresh dictation (it would resurrect the use window the release
   // listener just cleared).
   private powerGenerationAtStart = 0;
+  private releaseSharedAudioLease?: (options?: { immediate?: boolean }) => void;
   private pcmCallback: (chunk: PcmChunk) => void = () => {};
 
   constructor(options: WebMicAudioEngineOptions) {
@@ -1189,17 +1208,14 @@ export class WebMicAudioEngine {
       latencyMs: this.latencyMs,
     });
 
-    // Kick off getUserMedia and the shared-context warmup in parallel. The
-    // shared context resolves instantly when prewarmed; otherwise it pays the
-    // cold-start cost (AudioContext + worklet module) concurrently with the
-    // OS microphone handshake instead of after it.
-    const sharedContextPromise = prewarmVoiceInputAudio(this.workletUrl).catch(() => null);
-    const benchmarkFixturePromise = BENCHMARK_FIXTURE_ENABLED
-      ? prewarmVoiceInputBenchmarkFixture().catch(() => null)
-      : Promise.resolve(null);
     // exact deviceId makes getUserMedia authoritative. A separate enumeration
     // adds a serial device round trip and can become stale before opening it.
     this.assertNoPowerReleaseDuringStartup(powerGenerationAtStart);
+    this.releaseSharedAudioLease ??= audioContextPool.retainSharedVoiceInputAudio?.();
+    const sharedContextPromise = audioContextPool.prewarmVoiceInputAudio(this.workletUrl).catch(() => null);
+    const benchmarkFixturePromise = BENCHMARK_FIXTURE_ENABLED
+      ? prewarmVoiceInputBenchmarkFixture().catch(() => null)
+      : Promise.resolve(null);
     const streamPromise = this.awaitDirectStartupStep(
       navigator.mediaDevices.getUserMedia({
         audio,
@@ -1216,7 +1232,16 @@ export class WebMicAudioEngine {
       throw normalizeMicrophoneStartError(error, this.deviceId);
     });
 
-    const directStream = await streamPromise;
+    let directStream: MediaStream;
+    try {
+      directStream = await streamPromise;
+    } catch (error) {
+      this.releaseSharedAudioLease?.({
+        immediate: currentPowerReleaseGeneration() !== powerGenerationAtStart,
+      });
+      this.releaseSharedAudioLease = undefined;
+      throw error;
+    }
     // Assigned before the guarded section so the cleanup below can reach it.
     this.stream = directStream;
     // Registered immediately, not at the end of startup: every await below
@@ -1246,6 +1271,8 @@ export class WebMicAudioEngine {
           sampleRate: this.context.sampleRate,
         });
       } else {
+        this.releaseSharedAudioLease?.({ immediate: false });
+        this.releaseSharedAudioLease = undefined;
         this.context = new AudioContext();
         this.usingSharedContext = false;
       }
@@ -1447,6 +1474,10 @@ export class WebMicAudioEngine {
     if (this.context && !this.usingSharedContext && this.context.state !== 'closed') {
       await this.context.close();
     }
+    this.releaseSharedAudioLease?.({
+      immediate: currentPowerReleaseGeneration() !== this.powerGenerationAtStart,
+    });
+    this.releaseSharedAudioLease = undefined;
     this.usingSharedContext = false;
 
     this.processor = undefined;

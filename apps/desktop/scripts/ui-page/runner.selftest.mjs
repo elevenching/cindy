@@ -372,6 +372,73 @@ test('captures exact viewports and overviews in a hidden Electron window', async
     'closeMs includes all real Electron shutdowns, allowing per-measurement rounding');
 });
 
+// 测试价值
+// - 生产入口与可观察结果：通过真实 ui:check runner 执行器 runPlan 执行多主题与多视口组合，验证干净变体只启动 1 个后台 Electron 进程、各变体保持独立 localStorage 与准确 PNG 尺寸，且 macOS 经 LSUIElement wrapper 启动避免 Dock 抖动。
+// - Bug／规则依据：后台 ui:check 对每个变体无条件重启 Electron.app，且缺少 LSUIElement 导致反复拉起进程与 Dock 跳动。
+// - 现有覆盖缺口：原有 Electron 集成测试均在 variant 0 注入 clock/initScript 并抛错（触发脏重启）或单独测一个场景，未验证干净多变体复用的进程次数、localStorage 清理与 macOS LSUIElement 注入。
+// - 最小失败输入：两个主题 × 两个视口（4 个干净变体），variant 0 写入 localStorage 并改小视口后，其余变体仍必须为 clean storage、准确尺寸且总 launch 次数 === 1。
+// - tier：Electron integration（unit 无法覆盖 Electron BrowserWindow / session 销毁复用与 macOS app bundle plist）。
+test('reuses one background Electron process across clean variants while isolating storage, viewports, and macOS Dock', async (t) => {
+  const launchedExecPaths = [];
+  const launchedPlists = [];
+  const launch = _electron.launch.bind(_electron);
+  t.mock.method(_electron, 'launch', async (launchOptions) => {
+    launchedExecPaths.push(launchOptions.executablePath);
+    if (process.platform === 'darwin') {
+      const plistPath = path.join(path.dirname(path.dirname(launchOptions.executablePath)), 'Info.plist');
+      launchedPlists.push(await readFile(plistPath, 'utf8'));
+    }
+    return await launch(launchOptions);
+  });
+  const file = await entry('clean-reuse', 'mountPage({ render: () => <div>Clean reuse ready</div> });');
+  const options = parseOptions([
+    '--entry',
+    file,
+    '--engine',
+    'electron',
+    '--theme',
+    'all',
+    '--viewport',
+    '560x400,360x640',
+    '--json',
+  ]);
+  const definition = adhocPage(file);
+  definition.check = async (page, ui) => {
+    if (ui.theme === 'light' && ui.viewport.width === 560) {
+      await page.setViewportSize({ width: 700, height: 500 });
+      await page.evaluate(() => localStorage.setItem('clean-leak', 'present'));
+      return;
+    }
+    assert.equal(await page.evaluate(() => localStorage.getItem('clean-leak')), null);
+    assert.equal(
+      await page.evaluate(
+        async () => (await navigator.permissions.query({ name: 'camera' })).state,
+      ),
+      'denied',
+    );
+  };
+  const summary = await runPlan(
+    { pages: [{ definition, variants: variantsFor(definition, options) }] },
+    options,
+  );
+  assert.equal(summary.status, 'passed', JSON.stringify(summary.variants.map((v) => v.errors)));
+  assert.equal(summary.variants.length, 4);
+  for (const variant of summary.variants) {
+    assert.equal(variant.status, 'passed', JSON.stringify(variant.errors));
+    const png = await readFile(path.join(summary.evidence, variant.screenshots[0]));
+    assert.deepEqual(
+      { width: png.readUInt32BE(16), height: png.readUInt32BE(20) },
+      variant.viewport,
+    );
+  }
+  assert.equal(launchedExecPaths.length, 1, 'clean variants + overview reuse a single Electron process');
+  if (process.platform === 'darwin') {
+    assert.match(launchedPlists[0], /<key>LSUIElement<\/key>\s*<true\/>/);
+  }
+  assert.equal(summary.cleanup.runtimeClosed, true);
+  assert.equal(summary.cleanup.scratchRemoved, true);
+});
+
 // #10254: previous interrupt tests only stopped an already-published runtime.
 // Hold the second real launch's result at the asynchronous process boundary;
 // runPlan must not finish/delete its profile while that owned process is pending.
@@ -395,9 +462,12 @@ test('timeout and interrupt wait for an in-flight Electron relaunch', async (t) 
       clockActive = false;
     };
     let checks = 0;
-    definition.check = async () => {
+    definition.check = async (page) => {
       checks++;
       if (checks !== 1) return;
+      // Clean variants reuse the Electron process; install a fake clock on variant 0
+      // so variant 1 still exercises the real in-flight dirty relaunch race (#10254).
+      await page.clock.install({ time: 0 });
       // The first variant already has a native deadline. Keep its cancellation
       // working when the next variant switches to controlled numeric timer IDs.
       const clearNative = globalThis.clearTimeout;

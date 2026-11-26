@@ -8,6 +8,6 @@ import { formatRunningTokenCount } from './lib/runningTokenUsage';
 export function RunningTokenCount({ tokenUsage }: { tokenUsage: number }) {
   const { t } = useTranslation();
   const reducedMotion = useReducedMotion();
-  const displayed = useAnimatedNumber(tokenUsage, reducedMotion ? 0 : 400);
+  const displayed = useAnimatedNumber(tokenUsage, reducedMotion ? 0 : 400, formatRunningTokenCount);
   return <>{t('chat.runningStatus.tokenCount', { tokens: formatRunningTokenCount(displayed) })}</>;
 }

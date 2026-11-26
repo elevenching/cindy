@@ -17,6 +17,8 @@ import {
 vi.mock('../audioContextPool', () => ({
   PCM16K_WORKLET_NAME: 'pcm16k-worklet',
   prewarmVoiceInputAudio: vi.fn(),
+  retainSharedVoiceInputAudio: vi.fn(() => vi.fn()),
+  suspendSharedVoiceInputAudioNow: vi.fn(async () => undefined),
 }));
 
 type FakeTrack = MediaStreamTrack & {

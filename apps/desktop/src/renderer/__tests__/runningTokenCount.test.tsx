@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunningTokenCount } from '@/features/cc-agent/RunningTokenCount';
 import { RunningTokenRatePopover } from '@/features/cc-agent/RunningTokenRatePopover';
 import { emptyRateHistory } from '@/features/cc-agent/lib/runningTokenRateHistory';
+import { HIDDEN_ANIMATION_ATTR } from '@/lib/hiddenAnimationGate';
 import { useAnimatedNumber } from '@/hooks/useAnimatedNumber';
 
 const preference = vi.hoisted(() => ({ reduced: false }));
@@ -29,6 +30,7 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
 });
 afterEach(() => {
+  document.documentElement.removeAttribute(HIDDEN_ANIMATION_ATTR);
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -107,6 +109,39 @@ describe('counter lifecycle', () => {
     expect(frames.size).toBe(0);
     view.rerender(<RunningTokenCount tokenUsage={1250} />);
     expect(screen.getByText('1.3k tokens')).toBeTruthy();
+    expect(frames.size).toBe(0);
+  });
+
+  // 测试价值
+  // - 生产入口与可观察结果：渲染真实 RunningTokenCount，验证紧凑格式未变化时不调度 rAF、跨刻度插值只在该刻度首次变化时提交渲染，且窗口带 data-app-hidden 隐藏标记时直接对齐终值并零 rAF 调度。
+  // - Bug／规则依据：运行中 Token 计数器原先在 60/120fps rAF 期间无条件触发 React 重渲染且窗口隐藏后仍空跑。
+  // - 现有覆盖缺口：已有用例仅测 <1000 token 的插值以及 reducedMotion 开关，未测 >=1000 紧凑格式节流与隐藏态跳过 rAF。
+  // - 最小失败输入：1200 -> 1240（同属 1.2k）或 1000 -> 1500（6 个刻度变化）却触发 24 帧重渲染，或 data-app-hidden="true" 时仍挂起 rAF。
+  // - tier：unit（jsdom，与 runningTokenCount.test.tsx 同文件扩展）。
+  it('skips rAF when compact text is unchanged, throttles intermediate renders across steps, and snaps when hidden', () => {
+    const view = render(<RunningTokenCount tokenUsage={1200} />);
+    expect(screen.getByText('1.2k tokens')).toBeTruthy();
+    view.rerender(<RunningTokenCount tokenUsage={1240} />);
+    expect(frames.size).toBe(0);
+
+    const commits = vi.fn();
+    function TrackedCounter({ tokenUsage }: { tokenUsage: number }) {
+      commits();
+      return <RunningTokenCount tokenUsage={tokenUsage} />;
+    }
+    view.rerender(<TrackedCounter tokenUsage={1000} />);
+    commits.mockClear();
+    view.rerender(<TrackedCounter tokenUsage={1500} />);
+    expect(commits).toHaveBeenCalledTimes(1);
+    commits.mockClear();
+    for (let frame = 1; frame <= 24; frame++) advance((frame * 400) / 24);
+    expect(screen.getByText('1.5k tokens')).toBeTruthy();
+    expect(commits.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(frames.size).toBe(0);
+
+    document.documentElement.setAttribute(HIDDEN_ANIMATION_ATTR, 'true');
+    view.rerender(<TrackedCounter tokenUsage={2500} />);
+    expect(screen.getByText('2.5k tokens')).toBeTruthy();
     expect(frames.size).toBe(0);
   });
 });

@@ -1,4 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import { HIDDEN_ANIMATION_ATTR, isWindowHidden } from '@/lib/hiddenAnimationGate';
+
+function isCounterAnimationHidden(): boolean {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return false;
+  return (
+    isWindowHidden() ||
+    document.documentElement.hasAttribute(HIDDEN_ANIMATION_ATTR) ||
+    document.visibilityState === 'hidden'
+  );
+}
 
 /**
  * Animate a numeric value smoothly toward `target` using requestAnimationFrame
@@ -10,12 +20,21 @@ import { useEffect, useRef, useState } from 'react';
  *   currently displayed value (not the previous target), so rapid updates
  *   blend seamlessly without visible reverts.
  * - Returns an integer (rounded) to keep token-count formatting clean.
+ * - When `formatKey` is provided, skips rAF entirely when formatted output is
+ *   unchanged and only commits intermediate frames whose formatted key changes.
+ * - Snaps immediately without scheduling rAF when window animations are gated
+ *   hidden (`data-app-hidden` / `visibilityState === 'hidden'`).
  * - Cancels the in-flight RAF on unmount or when a new animation starts.
  *
- * @param target   The desired final value.
- * @param duration Animation duration in ms (default 400); non-positive values snap without RAF.
+ * @param target    The desired final value.
+ * @param duration  Animation duration in ms (default 400); non-positive values snap without RAF.
+ * @param formatKey Optional projection (e.g. `formatRunningTokenCount`); unchanged keys suppress intermediate renders.
  */
-export function useAnimatedNumber(target: number, duration = 400): number {
+export function useAnimatedNumber(
+  target: number,
+  duration = 400,
+  formatKey?: (value: number) => string | number,
+): number {
   const [displayed, setDisplayed] = useState(target);
 
   // Mutable refs avoid re-running the effect on every tick (which would happen
@@ -45,15 +64,16 @@ export function useAnimatedNumber(target: number, duration = 400): number {
     // jumps from the previous turn's total (e.g. 8.5k) down to 0 at the start
     // of every new turn (see makerChatStore handleStatusUpdate isTurnStart).
     // Easing through that drop reads as a confusing countdown — snap instead.
-    // A non-positive duration also snaps (e.g. reduced motion) without scheduling RAF.
-    if (duration <= 0 || to < from) {
-      setDisplayed(to);
-      return;
-    }
-
-    // For very small jumps, skip the RAF dance — the visual gain is zero and
-    // the overhead is wasted. (e.g. token counter going 1023 → 1024.)
-    if (to - from < 2) {
+    // Reduced motion, hidden windows, and unchanged formatted output also snap
+    // directly without scheduling 60fps/120fps rAF callbacks.
+    if (
+      duration <= 0 ||
+      to < from ||
+      to - from < 2 ||
+      isCounterAnimationHidden() ||
+      (formatKey && formatKey(from) === formatKey(to))
+    ) {
+      displayedRef.current = to;
       setDisplayed(to);
       return;
     }
@@ -61,11 +81,25 @@ export function useAnimatedNumber(target: number, duration = 400): number {
     const start = performance.now();
 
     const tick = (now: number) => {
+      if (isCounterAnimationHidden()) {
+        displayedRef.current = to;
+        setDisplayed(to);
+        rafRef.current = null;
+        return;
+      }
+
       const t = Math.min(1, (now - start) / duration);
       // ease-out quadratic: fast start, slow finish — feels responsive.
       const eased = 1 - (1 - t) * (1 - t);
-      const value = Math.round(from + (to - from) * eased);
-      setDisplayed(value);
+      const value = t >= 1 ? to : Math.round(from + (to - from) * eased);
+      const lastDisplayed = displayedRef.current;
+      if (
+        value !== lastDisplayed &&
+        (t >= 1 || !formatKey || formatKey(value) !== formatKey(lastDisplayed))
+      ) {
+        displayedRef.current = value;
+        setDisplayed(value);
+      }
 
       if (t < 1) {
         rafRef.current = requestAnimationFrame(tick);
@@ -82,7 +116,7 @@ export function useAnimatedNumber(target: number, duration = 400): number {
         rafRef.current = null;
       }
     };
-  }, [target, duration]);
+  }, [target, duration, formatKey]);
 
   return displayed;
 }

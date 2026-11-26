@@ -36,7 +36,11 @@ const types = {
   '.otf': 'font/otf',
 };
 // Background checks must not take focus or add a Dock icon to the user's desktop.
-if (!preview) app.dock?.hide();
+if (!preview) {
+  app.dock?.hide();
+  // Clean variant reuse briefly closes the prior window after the next one is created.
+  app.on('window-all-closed', () => {});
+}
 // The runner closes this process and removes its scratch folder. When the runner is killed
 // outright (SIGKILL, a stopped task, a tool timeout) none of that runs and a hidden window
 // would stay forever, so quit as soon as the runner is gone. POSIX reparents an orphan, which
@@ -134,6 +138,10 @@ app.whenReady().then(() => {
         plugins: false,
         navigateOnDragDrop: false,
       },
+    });
+    globalThis.__uiCheckActiveWindow = win;
+    win.on('closed', () => {
+      if (globalThis.__uiCheckActiveWindow === win) globalThis.__uiCheckActiveWindow = null;
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event, url) => {

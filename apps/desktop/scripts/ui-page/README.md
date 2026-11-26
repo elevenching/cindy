@@ -49,10 +49,11 @@ FAIL group-chat.no-sidebar.dark.zh-CN.1280x800
 - 后台检查使用无边框窗口，Windows 额外启用离屏渲染，避免原生边框的 DPI 取整和隐藏
   窗口不刷新导致尺寸偏差或截图超时；仍严格核对实际视口与目标尺寸。`ui:preview` 保留
   正常的可见窗口。
-- Electron 每个变体使用独立进程与浏览器上下文，先关闭上一实例再启动下一实例；仅新建窗口
-  无法清除上下文级的模拟时钟、初始化脚本和存储。构建产物与证据目录仍复用，失败场景也不会
-  将这些状态带入后续检查。测试源仅允许 HTML 全屏，后台运行不改变系统全屏状态，其它权限仍拒绝；
-  系统全屏切换需在完整 Desktop 验证。
+- 干净的 Electron 变体复用同一 Electron 进程：先新建隔离 `BrowserWindow`、销毁上一窗口并清空
+  `ui-check` 分区的存储与缓存，再在干净窗口中加载下一变体；若上一变体失败、超时、报错，或调用了
+  上下文级的模拟时钟、初始化脚本、自定义路由／权限／Cookie 等操作，仍会自动关闭并重启全新
+  Electron 进程，保证这些状态不会带入后续检查或沙箱 iframe。构建产物与证据目录仍复用。测试源仅
+  允许 HTML 全屏，后台运行不改变系统全屏状态，其它权限仍拒绝；系统全屏切换需在完整 Desktop 验证。
 - 报告写到 stdout。环境里设置了 `NODE_DEBUG` 时 Node 会往 stderr 刷调试日志，用
   `env -u NODE_DEBUG pnpm ui:check …` 或丢弃 stderr。
 - `real` 是本页面真实加载的产品代码，`not covered` 是这些场景没有验证的行为，`replaced`
@@ -228,11 +229,13 @@ Tailwind 配置由 Tailwind 直接从磁盘加载，两侧都用当前版本；�
   输出为资源 URL（包括 PDF.js 的预构建 `.mjs` worker）。两者的源文件都参与改动扫描与
   对照指纹；`.mjs` 在 Electron 和 Chromium 检查模式中按 JavaScript 提供，不以替身绕过加载。
 - 默认 `--engine electron`：仓库里的 Electron，与 Cindy 同一个 Chromium。每次运行使用新的
-  临时 profile、拒绝权限与下载、只允许访问测试源，运行完删除临时数据；后台检查不显示窗口、
-  不占 Dock。
+  临时 profile、拒绝权限与下载、只允许访问测试源，运行完删除临时数据；macOS 后台检查通过
+  本工作区 `node_modules/.cache/cindy-ui-check/` 下的 APFS 克隆 `LSUIElement` `.app` 启动
+  （按 Electron 版本与 `Info.plist` 指纹校验复用，不支持克隆时回退原生 Electron），避免冷启
+  先触碰 Dock 再隐藏。
 - `--engine chromium`：Playwright Chromium 或本机 Chrome（`--browser <路径>` 指定）。
-- `--timeout` 是每个变体的超时（默认 20 秒）；超时后场景不能再截图。Electron 各变体共用一个
-  窗口，超时的场景仍在运行时本次检查直接停止，避免它操作后面的变体。Ctrl+C 会写完
+- `--timeout` 是每个变体的超时（默认 20 秒）；超时后场景不能再截图，且当前变体不会复用进后续
+  干净变体；若超时的场景仍在运行，本次检查直接停止，避免它操作后面的变体。Ctrl+C 会写完
   `summary.json` 并关闭窗口。命令被直接杀掉（任务停止、工具超时）时来不及收尾：Electron
   窗口发现启动它的命令已不在后 1 秒内自行退出；临时目录名带命令的进程号，下次运行时删除
   进程已不在的临时目录；不带进程号的旧版目录无法判断是否仍在使用，因此保留。

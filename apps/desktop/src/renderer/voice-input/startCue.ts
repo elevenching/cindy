@@ -1,4 +1,11 @@
 let audioContext: AudioContext | null = null;
+let activeCueCount = 0;
+
+function suspendCueAudioContextIfIdle(): void {
+  if (activeCueCount > 0 || !audioContext || audioContext.state !== 'running') return;
+  if (typeof audioContext.suspend !== 'function') return;
+  void audioContext.suspend().catch(() => undefined);
+}
 
 type VoiceInputCue = {
   fromFrequency: number;
@@ -22,12 +29,14 @@ function getAudioContext(): AudioContext {
 export function prepareVoiceInputCues(): void {
   try {
     getAudioContext();
+    suspendCueAudioContextIfIdle();
   } catch {
     // Audio feedback is optional; recording must not depend on it.
   }
 }
 
 function playVoiceInputCue(cue: VoiceInputCue): Promise<void> {
+  activeCueCount += 1;
   return new Promise((resolve) => {
     let oscillator: OscillatorNode | undefined;
     let gain: GainNode | undefined;
@@ -46,6 +55,8 @@ function playVoiceInputCue(cue: VoiceInputCue): Promise<void> {
         oscillator.disconnect();
       }
       gain?.disconnect();
+      activeCueCount = Math.max(0, activeCueCount - 1);
+      suspendCueAudioContextIfIdle();
       resolve();
     };
     // A suspended audio context must not delay system mute indefinitely or

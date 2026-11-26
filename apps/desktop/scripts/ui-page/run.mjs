@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, _electron } from 'playwright-core';
 import { buildPage, inputsChanged, root } from './build.mjs';
@@ -14,6 +16,7 @@ import { variantsFor } from './options.mjs';
 import { reloadPage } from './registry.mjs';
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 export const origin = 'http://cindy-ui.test';
 const csp =
   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
@@ -205,6 +208,97 @@ async function pruneEvidence(outputRoot, current) {
 
 const SCRATCH_PREFIX = 'cindy-ui-check-';
 
+/**
+ * On macOS, background runs launch Electron through a worktree-local cached
+ * LSUIElement app clone under `node_modules/.cache/cindy-ui-check/` so
+ * LaunchServices never bounces the Dock before `app.dock.hide()` executes
+ * while keeping macOS bundle validation warm across invocations.
+ */
+async function prepareBackgroundElectronExecutable() {
+  const realExec = require('electron');
+  if (process.platform !== 'darwin') return realExec;
+  const macOsDir = path.dirname(realExec);
+  const realContents = path.dirname(macOsDir);
+  const realApp = path.dirname(realContents);
+  if (
+    path.basename(macOsDir) !== 'MacOS' ||
+    path.basename(realContents) !== 'Contents' ||
+    !path.basename(realApp).endsWith('.app')
+  ) {
+    return realExec;
+  }
+  const plistPath = path.join(realContents, 'Info.plist');
+  if (!existsSync(plistPath)) return realExec;
+  const plist = await readFile(plistPath, 'utf8');
+  if (!/<\/dict>\s*<\/plist>\s*$/.test(plist)) return realExec;
+  if (/<key>\s*LSUIElement\s*<\/key>/.test(plist)) return realExec;
+
+  const versionPath = path.join(path.dirname(realApp), 'version');
+  const execStat = statSync(realExec);
+  const fingerprint = JSON.stringify({
+    realExec,
+    plistSha256: createHash('sha256').update(plist).digest('hex'),
+    execSize: execStat.size,
+    execMtimeMs: execStat.mtimeMs,
+    version: existsSync(versionPath) ? (await readFile(versionPath, 'utf8')).trim() : '',
+  });
+
+  const cacheDir = path.join(root, 'node_modules', '.cache', 'cindy-ui-check');
+  const execName = path.basename(realExec);
+  const targetApp = path.join(cacheDir, 'Electron.app');
+  const targetExec = path.join(targetApp, 'Contents', 'MacOS', execName);
+  const stampPath = path.join(cacheDir, 'fingerprint.json');
+
+  if (
+    existsSync(targetExec) &&
+    existsSync(stampPath) &&
+    (await readFile(stampPath, 'utf8').catch(() => '')) === fingerprint
+  ) {
+    return targetExec;
+  }
+
+  await mkdir(cacheDir, { recursive: true });
+  const realCacheDir = await realpath(cacheDir);
+  const stagingDir = path.join(
+    realCacheDir,
+    `.staging-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+  const stagedApp = path.join(stagingDir, 'Electron.app');
+  const resolvedTargetApp = path.join(realCacheDir, 'Electron.app');
+  const resolvedTargetExec = path.join(resolvedTargetApp, 'Contents', 'MacOS', execName);
+  const resolvedStampPath = path.join(realCacheDir, 'fingerprint.json');
+  try {
+    await mkdir(stagingDir, { recursive: true });
+    // APFS copy-on-write clone keeps Frameworks/Resources inside the bundle so
+    // Chromium's macOS seatbelt sandbox issues bundle file extensions cleanly
+    // without duplicating disk blocks; non-APFS / cross-volume setups fall back.
+    await execFileAsync('cp', ['-cR', realApp, stagedApp]);
+    const stagedPlist = path.join(stagedApp, 'Contents', 'Info.plist');
+    const patchedPlist = plist.replace(
+      /<\/dict>(?=\s*<\/plist>\s*$)/,
+      '\t<key>LSUIElement</key>\n\t<true/>\n</dict>',
+    );
+    await rm(stagedPlist, { force: true });
+    await writeFile(stagedPlist, patchedPlist);
+    if (
+      !(
+        existsSync(resolvedTargetExec) &&
+        existsSync(resolvedStampPath) &&
+        (await readFile(resolvedStampPath, 'utf8').catch(() => '')) === fingerprint
+      )
+    ) {
+      await rm(resolvedTargetApp, { recursive: true, force: true });
+      await rename(stagedApp, resolvedTargetApp);
+      await writeFile(resolvedStampPath, fingerprint);
+    }
+    return resolvedTargetExec;
+  } catch {
+    return realExec;
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 const processAlive = (pid) => {
   try {
     process.kill(pid, 0);
@@ -382,7 +476,50 @@ export async function runPlan(plan, options, externalSignal) {
     }
     if (options.compare) summary.compare = { ref: options.compare };
 
+    let electronExecutablePromise;
+    let electronContextDirty = false;
+    const watchedTargets = new WeakSet();
+    const markDirtyOnCall = (target, methods) => {
+      if (!target || typeof target !== 'object' || watchedTargets.has(target)) return;
+      watchedTargets.add(target);
+      for (const method of methods) {
+        const original = target[method];
+        if (typeof original !== 'function') continue;
+        target[method] = function (...args) {
+          electronContextDirty = true;
+          return original.apply(this, args);
+        };
+      }
+    };
+    const watchElectronPage = (page) => {
+      // Electron serves the test origin itself (electron.cjs) and cancels any other request.
+      page.on('requestfailed', (request) => {
+        if (new URL(request.url()).origin !== origin) current.blocked.push(request.url());
+      });
+      // Context-wide mutations (fake clocks, init scripts, custom routes/permissions) cannot
+      // be wiped by replacing BrowserWindow alone and force a clean Electron relaunch next.
+      markDirtyOnCall(page.clock, ['install']);
+      const ctx = page.context();
+      markDirtyOnCall(ctx, [
+        'addInitScript',
+        'route',
+        'routeWebSocket',
+        'unroute',
+        'exposeFunction',
+        'exposeBinding',
+        'grantPermissions',
+        'clearPermissions',
+        'setExtraHTTPHeaders',
+        'addCookies',
+        'clearCookies',
+        'setOffline',
+        'setGeolocation',
+      ]);
+      markDirtyOnCall(ctx.clock, ['install']);
+    };
+
     const launchRuntime = (size) => measure('launchMs', async () => {
+      const launchTimeout = Math.max(options.timeout, 15_000);
       if (options.engine === 'electron') {
         const env = Object.fromEntries(
           Object.entries(process.env).filter(([key]) =>
@@ -391,14 +528,18 @@ export async function runPlan(plan, options, externalSignal) {
             ),
           ),
         );
+        const executablePath =
+          options.mode === 'preview'
+            ? require('electron')
+            : await (electronExecutablePromise ??= prepareBackgroundElectronExecutable());
         // Playwright's Electron launcher always installs signal handlers that exit(130) before
         // the CLI can write the summary and remove scratch data; the CLI owns interrupts instead.
         const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
         const ownListeners = new Map(signals.map((name) => [name, process.listeners(name)]));
         launching = _electron.launch({
-          executablePath: require('electron'),
+          executablePath,
           args: [fileURLToPath(new URL('./electron.cjs', import.meta.url))],
-          timeout: options.timeout,
+          timeout: launchTimeout,
           env: {
             ...env,
             CINDY_UI_PROFILE: path.join(scratch, 'profile'),
@@ -423,11 +564,9 @@ export async function runPlan(plan, options, externalSignal) {
               if (!ownListeners.get(name).includes(listener)) process.off(name, listener);
         }
         controller.signal.throwIfAborted();
-        electronPage = await app.firstWindow({ timeout: options.timeout });
-        // Electron serves the test origin itself (electron.cjs) and cancels any other request.
-        electronPage.on('requestfailed', (request) => {
-          if (new URL(request.url()).origin !== origin) current.blocked.push(request.url());
-        });
+        electronContextDirty = false;
+        electronPage = await app.firstWindow({ timeout: launchTimeout });
+        watchElectronPage(electronPage);
         summary.versions = await app.evaluate(() => ({
           electron: process.versions.electron,
           chrome: process.versions.chrome,
@@ -437,7 +576,7 @@ export async function runPlan(plan, options, externalSignal) {
         browser = await chromium.launch({
           executablePath,
           headless: options.mode !== 'preview',
-          timeout: options.timeout,
+          timeout: launchTimeout,
           handleSIGINT: false,
           handleSIGTERM: false,
           handleSIGHUP: false,
@@ -449,24 +588,62 @@ export async function runPlan(plan, options, externalSignal) {
 
     let usedElectronWindow = false;
     const freshElectronPage = async (size) => {
+      let relaunched = !usedElectronWindow;
       if (usedElectronWindow) {
-        // Electron windows share Playwright's browser context. Replacing only
-        // the window leaves context clocks/init scripts installed, including in
-        // later sandboxed iframes. A fresh runtime isolates every variant, even
-        // after a failed scenario; bundles and evidence stay available on disk.
-        await measure('closeMs', stopRuntime);
-        app = undefined;
-        electronPage = undefined;
-        stopping = undefined;
-        await launchRuntime(size);
+        const needsRelaunch =
+          electronContextDirty ||
+          !app ||
+          app.process().exitCode !== null ||
+          !electronPage ||
+          electronPage.isClosed();
+        if (needsRelaunch) {
+          // Dirty variants (context clock, init scripts, failures) need a fresh process so
+          // context-wide Playwright hooks cannot leak into subsequent variants/iframes.
+          await measure('closeMs', stopRuntime);
+          app = undefined;
+          electronPage = undefined;
+          stopping = undefined;
+          await launchRuntime(size);
+          relaunched = true;
+        } else {
+          const nextWindow = app.waitForEvent('window', { timeout: options.timeout });
+          try {
+            await app.evaluate(({ app: electronApp }, viewport) => {
+              electronApp.emit('ui-check:create-window', viewport);
+            }, size);
+            electronPage = await nextWindow;
+          } catch (error) {
+            nextWindow.catch(() => {});
+            throw error;
+          }
+          watchElectronPage(electronPage);
+          await app.evaluate(async ({ BrowserWindow, session }, viewport) => {
+            const active =
+              globalThis.__uiCheckActiveWindow ?? BrowserWindow.getAllWindows().at(-1);
+            const closing = [];
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (win === active || win.isDestroyed()) continue;
+              closing.push(new Promise((resolve) => win.once('closed', resolve)));
+              win.destroy();
+            }
+            await Promise.all(closing);
+            const ownSession = session.fromPartition('ui-check');
+            await ownSession.clearStorageData();
+            await ownSession.clearCache();
+            active.setContentSize(viewport.width, viewport.height);
+          }, size);
+        }
       }
       usedElectronWindow = true;
-      // Windows may clamp a newly created native window to the display work area.
-      // Size it after creation, as for the first window; the renderer assertion
-      // below remains exact, including tall screenshot fixtures.
-      await app.evaluate(({ BrowserWindow }, viewport) => {
-        BrowserWindow.getAllWindows()[0].setContentSize(viewport.width, viewport.height);
-      }, size);
+      if (relaunched) {
+        // Windows may clamp a newly created native window to the display work area.
+        // Size it after creation, as for the first window; the renderer assertion
+        // below remains exact, including tall screenshot fixtures.
+        await app.evaluate(({ BrowserWindow }, viewport) => {
+          const active = globalThis.__uiCheckActiveWindow ?? BrowserWindow.getAllWindows()[0];
+          active.setContentSize(viewport.width, viewport.height);
+        }, size);
+      }
       return electronPage;
     };
 
@@ -697,6 +874,7 @@ export async function runPlan(plan, options, externalSignal) {
             if (role === 'after') await definition.check?.call(definition, page, ui);
             else
               await definition.check?.call(definition, page, ui).catch((error) => {
+                if (app) electronContextDirty = true;
                 result.warnings.push(
                   `check on ${options.compare} stopped: ${String(error.message).split('\n')[0]}`,
                 );
@@ -783,6 +961,20 @@ export async function runPlan(plan, options, externalSignal) {
             controller.abort(error);
           }
         }
+        if (
+          app &&
+          (timedOut ||
+            interrupted ||
+            result.status === 'failed' ||
+            result.status === 'before-failed' ||
+            result.errors.length > 0 ||
+            (opened?.errors?.length ?? 0) > 0 ||
+            !electronPage ||
+            electronPage.isClosed() ||
+            app.process().exitCode !== null)
+        ) {
+          electronContextDirty = true;
+        }
         opened?.detach?.();
         if (opened?.context) await opened.context.close().catch(() => {});
         result.timings.totalMs = Math.round(performance.now() - started);
@@ -821,7 +1013,8 @@ export async function runPlan(plan, options, externalSignal) {
           };
           if (app)
             await app.evaluate(({ BrowserWindow }, size) => {
-              BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height);
+              const active = globalThis.__uiCheckActiveWindow ?? BrowserWindow.getAllWindows()[0];
+              active.setContentSize(size.width, size.height);
             }, viewport);
           else await opened.page.setViewportSize(viewport);
           if (app) {
