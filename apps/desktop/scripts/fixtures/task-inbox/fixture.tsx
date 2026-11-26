@@ -26,6 +26,7 @@ const now = Date.now();
 const sessions = [
   ['ready', '本周工作总结，等你看一眼'],
   ['waiting', '需要你确认发布范围'],
+  ['pinned', '已置顶的专项调研'],
   ['running', '正在整理调研结果'],
   ['following', '自动跟进 PR，等待下次检查'],
   ['later', '明天继续的设计方案'],
@@ -40,7 +41,7 @@ const sessions = [
   snoozedAt: id === 'later' ? new Date(now).toISOString() : null,
   snoozedUntil: id === 'later' ? new Date(now + 3600000).toISOString() : null,
   agentKind: 'codex',
-  pinnedAt: id === 'waiting' ? new Date(now).toISOString() : null,
+  pinnedAt: id === 'pinned' ? new Date(now).toISOString() : null,
   sdkSessionId: null,
   remoteHostId: null,
   deviceLinkDeviceId: null,
@@ -139,7 +140,7 @@ function StructureSpecimen() {
     companion: { id: 'demo', role: 'routine', taskProjectDir: task.workingDir } };
   const source = [task, report, teammate];
   const inboxSessions = filterSidebarTasks([task, ...sessions.slice(1), report], filter.inbox, new Map());
-  const inboxPriority = { ...priorityContext, attentionSessionIds: new Set(['report', 'waiting']) };
+  const inboxPriority = { ...priorityContext, attentionSessionIds: new Set(['report', 'waiting', 'pinned']) };
   const { hasUnread, now: inboxNow } = useInboxUnread(inboxSessions, [], inboxPriority, () => false);
   const allProjects = groupSessions(source).projects;
   const projects = groupSessions(filterSidebarTasks(source, filter, new Map())).projects;

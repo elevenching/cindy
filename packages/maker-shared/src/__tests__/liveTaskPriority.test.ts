@@ -110,3 +110,17 @@ it('keeps only a teammate\'s own conversations and project tasks with the teamma
     teammate: isTeammateOwnInboxTask({ source: 'desktop', workingDir: '/Users/me/code/app' }) }, now)).toBe('inbox');
 });
 
+// 2026-11-26 user decision (task-inbox.md): individually pinned tasks stay in the pinned section
+// and are excluded from inbox sections; unit test on taskInboxSection across all task states.
+it('excludes individually pinned tasks from every inbox section regardless of state', () => {
+  const now = Date.parse('2026-11-26T06:00:00Z');
+  const pinnedAt = new Date(now).toISOString();
+  expect(taskInboxSection({ pinnedAt }, { running: false, waiting: false }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt }, { running: false, waiting: false, unread: true }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt }, { running: true, waiting: true }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt }, { running: true, waiting: false }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt }, { running: false, waiting: false, following: true }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt, snoozedUntil: new Date(now + 3600000).toISOString() }, { running: false, waiting: false }, now)).toBeNull();
+  expect(taskInboxSection({ pinnedAt, status: 'archived' }, { running: false, waiting: false }, now)).toBeNull();
+});
+

@@ -1658,8 +1658,8 @@ function ExpandedView({
   // A teammate's own conversations and its project's tasks stay out of the inbox until they need the
   // owner; a task it opened elsewhere is ordinary work (shared with the phone).
   const isInboxTeammateTask = isTeammateOwnInboxTask;
-  // Pins are shortcuts. Classify the task through its own project or dialogue in the inbox.
-  const inboxGroups = useProjectGroups(inboxSourceSessions, projectAliases.aliases, true,
+  // Individually pinned tasks stay in the pinned section; unpinned tasks inside pinned projects still enter the inbox.
+  const inboxGroups = useProjectGroups(inboxSourceSessions, projectAliases.aliases, false,
     undefined, localPlatform, undefined, projectAliasMembers);
 
   const activityFilteredPersistentLocalProjects = useMemo(
@@ -2032,7 +2032,7 @@ function ExpandedView({
   // Group actions include pinned and content-filtered members;
   // allProjectGroups still respects device scope and task status.
   const dialogueActionSessions = allProjectGroups.dialogues;
-  const dialogueFilterCount = taskListMode === 'inbox' ? dialogueActionSessions.length : allGroups.dialogues.length;
+  const dialogueFilterCount = allGroups.dialogues.length;
 
   // 对话段排序状态提升到此处:DialogueSection(展开态)受控消费,rail 对话
   // 面板按同一排序渲染——否则折叠后面板的前 N 条/折叠溢出与展开态刚排好的

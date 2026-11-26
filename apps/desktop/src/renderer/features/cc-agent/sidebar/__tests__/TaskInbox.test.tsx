@@ -263,3 +263,31 @@ it('lights for a due remote result and clears as soon as the host acknowledges i
     vi.useRealTimers();
   }
 });
+
+// Unit, task-inbox.md (2026-11-26): individually pinned tasks stay in the pinned section only and
+// must neither render inside TaskInbox sections nor light the inbox toggle's unread indicator.
+it('excludes individually pinned tasks from TaskInbox sections, counts, and unread indicator', () => {
+  const now = Date.now();
+  const pinnedAt = new Date(now).toISOString();
+  const pinnedUnread = { id: 'pinned-unread', title: 'Pinned', status: 'active', pinnedAt } as Session;
+  const pinnedArchived = { id: 'pinned-archived', title: 'Pinned Archived', status: 'archived', pinnedAt } as Session;
+  const unpinned = { id: 'unpinned', title: 'Unpinned', status: 'active', pinnedAt: null } as Session;
+  const priority = { runningSessionIds: new Set<string>(), attentionSessionIds: new Set(['pinned-unread']) };
+  const view = render(<TaskInbox sessions={[pinnedUnread, pinnedArchived, unpinned]} priorityContext={priority}
+    runningSessionIds={new Set()} attachedSessionIds={new Set()} notifications={new Set(['pinned-unread'])}
+    onSessionClick={() => {}} onAction={() => {}} onRename={() => {}} onTogglePin={() => {}} onScheduleAction={() => {}} />);
+  expect(screen.getAllByTestId('row').map(row => row.textContent)).toEqual(['unpinned']);
+  expect(Array.from(view.container.querySelectorAll('section > button'), button => button.lastElementChild?.textContent))
+    .toEqual(['1', '0', '0', '0']);
+
+  const unreadOnlyPinned = renderHook(() => useInboxUnread([pinnedUnread, pinnedArchived], [], priority, () => false));
+  expect(unreadOnlyPinned.result.current.hasUnread).toBe(false);
+
+  const unreadWithUnpinned = renderHook(() => useInboxUnread(
+    [pinnedUnread, unpinned],
+    [],
+    { runningSessionIds: new Set<string>(), attentionSessionIds: new Set(['pinned-unread', 'unpinned']) },
+    () => false,
+  ));
+  expect(unreadWithUnpinned.result.current.hasUnread).toBe(true);
+});

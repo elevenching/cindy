@@ -418,8 +418,9 @@ describe('mobileHome', () => {
     ]);
   });
 
-  it('keeps pinned sessions and chats outside project groups', () => {
+  it.each([false, true])('keeps pinned sessions and chats outside project groups (inboxMode=%s)', (inboxMode) => {
     const home = buildMobileHomePresentation({
+      inboxMode,
       devices: [{ canOpen: true, deviceId: 'mac-a', name: 'Mac A' }],
       sessions: [
         session('pinned', {
@@ -621,6 +622,37 @@ describe('mobileHome', () => {
     // 置顶行不参与折叠;单次运行的任务不成组,保持普通会话行。
     expect(home.pinned.map((item) => [item.session.id, item.automationGroup])).toEqual([['pinned-run', undefined]]);
     expect(home.projects[0].sessions.map((item) => [item.session.id, item.automationGroup])).toEqual([['solo-run', undefined]]);
+  });
+
+  // 2026-11-26 user decision (task-inbox.md): inboxMode leaves unpinned automation runs uncollapsed
+  // while keeping pinned runs in home.pinned only (no duplicate row inside chats/projects).
+  it('leaves unpinned automation runs uncollapsed in inbox mode while keeping pinned runs in pinned only', () => {
+    const home = buildMobileHomePresentation({
+      inboxMode: true,
+      devices: [{ canOpen: true, deviceId: 'mac-a', name: 'Mac A' }],
+      scheduleIndex: new Map([
+        ['pinned-run', {
+          scheduleId: 'sched-1', scheduleName: '每日巡检', unreadRunIds: [], unreadCount: 0, running: false, latestRunAt: 3,
+        }],
+        ['run-1', {
+          scheduleId: 'sched-1', scheduleName: '每日巡检', unreadRunIds: [], unreadCount: 0, running: false, latestRunAt: 1,
+        }],
+        ['run-2', {
+          scheduleId: 'sched-1', scheduleName: '每日巡检', unreadRunIds: [], unreadCount: 0, running: false, latestRunAt: 2,
+        }],
+      ]),
+      sessions: [
+        session('pinned-run', { deviceLinkDeviceId: 'mac-a', pinnedAt: '2026-01-01T00:05:00.000Z', source: 'scheduler' }),
+        session('run-1', { deviceLinkDeviceId: 'mac-a', source: 'scheduler', updatedAt: '2026-01-01T00:02:00.000Z' }),
+        session('run-2', { deviceLinkDeviceId: 'mac-a', source: 'scheduler', updatedAt: '2026-01-01T00:03:00.000Z' }),
+      ],
+    });
+
+    expect(home.pinned.map((item) => item.session.id)).toEqual(['pinned-run']);
+    expect(home.projects[0].sessions.map((item) => [item.session.id, item.automationGroup])).toEqual([
+      ['run-2', undefined],
+      ['run-1', undefined],
+    ]);
   });
 
   it('keeps the latest run as primary when an older successful run is unread', () => {

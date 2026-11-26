@@ -652,6 +652,8 @@ function snoozeLabel(until: number): string {
 
 /**
  * Inbox never uses unread as a settled marker. Automation runs are individually actionable.
+ * Individually pinned tasks stay in the top pinned section and are left out of inbox sections
+ * (`taskInboxSection` returns null; 2026-11-26 user decision).
  * A teammate's main conversation is one row placed by whose turn it is and left out while idle
  * and read (2026-11-20 user decision); teammate rows lead their section, most recent first.
  */

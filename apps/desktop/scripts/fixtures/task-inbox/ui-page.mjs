@@ -176,7 +176,8 @@ export default {
       assert.equal(await hide.getAttribute('aria-checked'), 'false');
       await hide.click();
       await report.waitFor({ state: 'detached' });
-      await page.getByRole('menuitem', { name: new RegExp(await ui.t('ccAgent.sidebar.filterCreatorsHeading')) }).press('ArrowRight');
+      const creatorsHeading = await ui.t('ccAgent.sidebar.filterCreatorsHeading');
+      await page.getByRole('menuitem', { name: new RegExp(`^${creatorsHeading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).press('ArrowRight');
       await page.getByRole('menuitem', { name: await ui.t('ccAgent.sidebar.filterCreatorsNone'), exact: true }).press('Enter');
       await teammate.waitFor({ state: 'detached' });
       await page.locator('[data-session-id="ready"]').waitFor();
@@ -250,9 +251,10 @@ export default {
     // Inbox shows a one-click Done instead of the two-step archive.
     const archiveLabel = await ui.t('ccAgent.sidebar.inbox.complete');
     const snoozeLabel = await ui.t('ccAgent.sidebar.inbox.snooze');
-    const pinned = page.locator('[data-session-id="waiting"]');
-    assert.equal(await pinned.getByRole('button', { name: archiveLabel, exact: true }).count(), 1);
-    assert.equal(await pinned.getByRole('button', { name: snoozeLabel, exact: true }).count(), 0);
+    assert.equal(await page.locator('[data-session-id="pinned"]').count(), 0);
+    const waiting = page.locator('[data-session-id="waiting"]');
+    assert.equal(await waiting.getByRole('button', { name: archiveLabel, exact: true }).count(), 1);
+    assert.equal(await waiting.getByRole('button', { name: snoozeLabel, exact: true }).count(), 1);
     const moreLabel = await ui.t('ccAgent.sidebar.sessionMenu.moreActions');
     assert.equal(await ready.getByRole('button', { name: archiveLabel, exact: true }).count(), 1);
     assert.equal(await page.getByRole('button', { name: moreLabel, exact: true }).count(), 0);

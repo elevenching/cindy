@@ -160,20 +160,30 @@ describe('home content filters (desktop 筛选 parity)', () => {
     expect(activeContentFilterCount({ lastActivity: '1d', projects: ['p2'], vendor: 'pi' })).toBe(3);
   });
 
-  // Unit, task-inbox.md: exercise real Home grouping before filtering. The fixtures above
-  // cannot catch a pinned task being removed before the inbox gets to classify it.
-  it('keeps both pins accessible while the inbox counts only pins matching its project filter', () => {
-    const sessions = ['A', 'B'].map(name => ({
-      ...item(name).session, title: name, workingDir: '/' + name, workspaceKind: 'project',
-      status: 'active', deviceLinkDeviceId: 'd', pinnedAt: new Date(NOW).toISOString(),
-    }));
+  // Unit, task-inbox.md (2026-11-26): pinned tasks stay accessible in pinned regardless of project
+  // filter, while only unpinned tasks matching the project filter appear and count in the inbox.
+  it('keeps pinned tasks out of inbox sections while counting matching unpinned tasks', () => {
+    const sessions = [
+      {
+        ...item('A').session, title: 'A', workingDir: '/A', workspaceKind: 'project',
+        status: 'active', deviceLinkDeviceId: 'd', pinnedAt: new Date(NOW).toISOString(),
+      },
+      {
+        ...item('B').session, title: 'B', workingDir: '/B', workspaceKind: 'project',
+        status: 'active', deviceLinkDeviceId: 'd', pinnedAt: new Date(NOW).toISOString(),
+      },
+      {
+        ...item('U').session, title: 'U', workingDir: '/A', workspaceKind: 'project',
+        status: 'active', deviceLinkDeviceId: 'd', pinnedAt: null,
+      },
+    ];
     const inbox = buildMobileHomePresentation({ sessions, now: NOW, statusFilter: 'all', inboxMode: true });
     const filtered = applyHomeContentFilters(inbox, { ...NO_FILTERS, projects: ['device:d:/A'] }, NOW);
-    expect(filtered.pinned.map(item => item.session.id).sort()).toEqual(['A', 'B']);
-    const signals = { ...EMPTY_HOME_PRIORITY_CONTEXT, runningSessionIds: new Set(['A']) };
+    expect(filtered.pinned.map(entry => entry.session.id).sort()).toEqual(['A', 'B']);
+    const signals = { ...EMPTY_HOME_PRIORITY_CONTEXT, runningSessionIds: new Set(['A', 'U']) };
     const sections = buildInboxHomeSections(filtered, new Set(), signals, NOW);
     expect(sections.find(section => section.key === 'inbox-working')).toMatchObject({
-      count: 1, data: [{ item: { session: { id: 'A' } } }],
+      count: 1, data: [{ item: { session: { id: 'U' } } }],
     });
     expect(sections.find(section => section.key === 'inbox-inbox')?.count).toBe(0);
   });
@@ -291,9 +301,14 @@ describe('task info and retained Home behavior', () => {
   });
 
   it('keeps real project candidates available despite nonmatching search and status', () => {
-    const sessions = ['A', 'B'].map((name) => ({ ...item(name).session, title: name, workingDir: '/' + name,
-      workspaceKind: 'project', status: 'active', deviceLinkDeviceId: 'd', deviceLinkDeviceName: 'Computer',
-      pinnedAt: name === 'A' ? new Date(NOW).toISOString() : null }));
+    const sessions = [
+      ...['A', 'B'].map((name) => ({ ...item(name).session, title: name, workingDir: '/' + name,
+        workspaceKind: 'project', status: 'active', deviceLinkDeviceId: 'd', deviceLinkDeviceName: 'Computer',
+        pinnedAt: null })),
+      { ...item('C').session, title: 'C', workingDir: '/C',
+        workspaceKind: 'project', status: 'active', deviceLinkDeviceId: 'd', deviceLinkDeviceName: 'Computer',
+        pinnedAt: new Date(NOW).toISOString() },
+    ];
     // Keep the existing production-expression fixture complete when aliases become an optional Home input.
     const result = surfaceValue('projectFilterUniverse', { useMemo, buildMobileHomePresentation,
       deviceModels: [], scheduleIndex: new Map(), selectedDeviceId: null, homeSessions: sessions,

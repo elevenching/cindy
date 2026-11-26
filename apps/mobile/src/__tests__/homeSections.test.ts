@@ -561,6 +561,32 @@ it('builds inbox sections and recomputes snooze expiry without losing collapsed 
   expect(buildInboxHomeSections(home, new Set(), signals, now + 3600000).find(s => s.key === 'inbox-inbox')?.count).toBe(4);
 });
 
+// Unit, task-inbox.md (2026-11-26): even if a pinned task appears in grouped chats/projects,
+// buildInboxHomeSections excludes it from every inbox section and count.
+it('excludes individually pinned tasks from every inbox section and count', () => {
+  const now = Date.parse('2026-11-26T08:00:00Z');
+  const pinnedChat = listItem('pin-chat', new Date(now).toISOString());
+  pinnedChat.session.pinnedAt = new Date(now).toISOString();
+  const pinnedArchived = listItem('pin-archived', new Date(now).toISOString());
+  pinnedArchived.session.pinnedAt = new Date(now).toISOString();
+  pinnedArchived.session.status = 'archived';
+  const regular = listItem('regular', new Date(now).toISOString());
+  const home = presentation({
+    pinned: [pinnedChat, pinnedArchived],
+    chats: [pinnedChat, regular],
+    projects: [projectGroup('p', new Date(now).toISOString(), [pinnedArchived])],
+  });
+  const signals = { runningSessionIds: new Set(['pin-chat']), waitingSessionIds: new Set<string>(), unreadSessionIds: new Set<string>() };
+  const sections = buildInboxHomeSections(home, new Set(), signals, now);
+  expect(sections.map(s => [s.key, s.count])).toEqual([
+    ['inbox-inbox', 1],
+    ['inbox-working', 0],
+    ['inbox-snoozed', 0],
+    ['inbox-archived', 0],
+  ]);
+  expect(sections.find(s => s.key === 'inbox-inbox')?.data.map(row => row.key)).toEqual(['inbox::regular']);
+});
+
 // 2026-11-18 user decision: teammates' routine results filled the phone's inbox. Teammate tasks
 // (by the teammate filter's test) are listed only while they need the user or run.
 it('leaves idle teammate conversations out of the inbox until they need the user or run', () => {

@@ -40,6 +40,7 @@ export type TaskInboxSection = 'inbox' | 'working' | 'snoozed' | 'archived';
 
 export interface TaskInboxState {
   status?: string;
+  pinnedAt?: string | null;
   snoozedUntil?: string | null;
   snoozedAt?: string | null;
   userSendAt?: string | null;
@@ -72,7 +73,8 @@ export function isTeammateOwnInboxTask(session: {
  * A teammate's task is listed only while it needs the user (a question, a permission or an
  * error: Pending) or runs (Working); otherwise it stays with the teammate and the inbox
  * leaves it out (null), so idle teammate tasks never pile up (2026-11-18 user decision).
- * Tasks the user completed or snoozed keep those sections.
+ * Individually pinned tasks (`pinnedAt`) stay in the top pinned section and are left out of
+ * inbox sections (`null`; 2026-11-26 user decision). Tasks the user completed or snoozed keep those sections.
  */
 export function taskInboxSection(
   task: TaskInboxState,
@@ -84,6 +86,7 @@ export function taskInboxSection(
   },
   nowMs: number,
 ): TaskInboxSection | null {
+  if (task.pinnedAt) return null;
   if (task.status === 'archived') return 'archived';
   if (taskSnoozeUntil(task) > nowMs) return 'snoozed';
   if (signals.waiting) return 'inbox';

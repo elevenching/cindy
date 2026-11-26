@@ -116,7 +116,7 @@ export interface MobileHomePresentation {
   emptyNoDevice: MobileHomeNoDeviceContext | null;
   emptyTitle: string;
   overview: MobileHomeOverview;
-  /** Pinned shortcuts. In inbox mode these tasks also belong to their project or dialogue. */
+  /** Pinned shortcuts; never duplicated in chats or projects. */
   pinned: RemoteSessionListItem[];
   primaryDevice: MobileHomeDeviceFilterItem | null;
   projects: MobileHomeProjectGroup[];
@@ -130,7 +130,7 @@ export function mobileHomeSessionItems(home: MobileHomePresentation): RemoteSess
 }
 
 export interface MobileHomeOptions {
-  /** Inbox classifies every task in its own project or dialogue, including pinned tasks. */
+  /** Inbox leaves automation runs uncollapsed so each run is classified individually; pinned tasks stay in pinned only. */
   inboxMode?: boolean;
   projectAliases?: ProjectAliasDisplayIndex;
   devices?: readonly MobileHomeDeviceLike[];
@@ -209,7 +209,7 @@ export function buildMobileHomePresentation({
     localizer,
   ));
   const pinned = items.filter((item) => !!item.session.pinnedAt);
-  const groupedItems = inboxMode ? items : items.filter((item) => !item.session.pinnedAt);
+  const groupedItems = items.filter((item) => !item.session.pinnedAt);
   // 普通列表折叠同一自动化的多次运行，置顶行不参与。收件箱按每次运行的状态分别归类。
   // 首页是多设备聚合列表,scopeKey 按维度隔离分组:
   // - chats(dialogue)按展示设备隔离 —— 防止 legacy fallback 键(仅 workingDir + 标题,无
