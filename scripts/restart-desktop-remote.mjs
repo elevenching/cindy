@@ -345,9 +345,12 @@ function assertDesktopDevCachePath(root, target) {
   }
 }
 
-export function clearDesktopDevCaches(root = rootDir, { logger = console } = {}) {
+export function clearDesktopDevCaches(root = rootDir, { logger = console, keepViteDeps = false } = {}) {
   const removed = [];
-  for (const cacheDir of desktopDevCacheDirs(root)) {
+  const cacheDirs = desktopDevCacheDirs(root);
+  const viteDepsCache = path.resolve(root, 'apps', 'desktop', 'node_modules', '.vite');
+  for (const cacheDir of cacheDirs) {
+    if (keepViteDeps && cacheDir === viteDepsCache) continue;
     assertDesktopDevCachePath(root, cacheDir);
     if (!fs.existsSync(cacheDir)) continue;
     fs.rmSync(cacheDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
@@ -1831,7 +1834,11 @@ async function main() {
   if (process.env.CINDY_PERSONAL_ASSET_DIGEST && process.env.CINDY_PERSONAL_MONITOR_DIR && process.env.CINDY_PERSONAL_GENERATION) {
     const { verifyInterface } = await import('./personal-build/interface-assets.mjs');
     verifyInterface(rootDir, process.env.CINDY_PERSONAL_ASSET_DIGEST);
-  } else if (!preserveRunning) clearDesktopDevCaches(rootDir);
+  } else if (!preserveRunning) {
+    const keepViteDeps = argv.includes('--reuse-vite-deps');
+    if (keepViteDeps) console.log('==> Reusing Vite dependency cache when valid.');
+    clearDesktopDevCaches(rootDir, { keepViteDeps });
+  }
 
   let startupStatusPath = null;
   if (waitReady) {
