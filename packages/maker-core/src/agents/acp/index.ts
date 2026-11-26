@@ -48,5 +48,6 @@ export {
   CINDY_PLUGIN_GATEWAY_MCP_SERVER,
   formatPluginEngineSkillList,
   renderPluginEngineCapabilityBriefing,
+  sanitizePluginEngineBriefingText,
   type PluginEngineBriefingSkill,
 } from './briefing.js';

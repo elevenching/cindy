@@ -1180,6 +1180,58 @@ describe('AcpAgent (the acp engine)', () => {
     expect(briefing!.text).toContain('<cindy-skills>');
   });
 
+  // 测试价值
+  // - 生产入口与可观察结果：AcpAgent.startSession → AcpSession.send 在新会话首条消息前拼出的 capability briefing；
+  //   断言独立 `/command` 被替换为 `／command` 且 JSON、URL、多段路径、比值斜杠、XML 标签与 SKILL.md 路径保持原样。
+  // - Bug／规则依据：docs/plans/acp-plugin-bridge.md「插件与 Skill 告知（2026-11-24）」，防止外部插件引擎
+  //   （如 Antigravity 的 `/learn`、`/plan`、`/goal`）把首轮能力说明里的斜杠文本误判为用户命令。
+  // - 现有覆盖缺口：已有用例只验证花名册与 Skill 拼装顺序及换行折叠，未覆盖斜杠命令文本、280 字符截断边界与非命令斜杠保留。
+  // - 最小失败输入：Skill 描述或花名册含 `/learn`、`/skill:learn`、`` `/plan` ``、`(/goal)`、`输入/compact`，以及在 280 字符处截断后露出 `/plan` 的路径；tier：unit。
+  it('neutralizes standalone slash commands in capability briefing while preserving paths, URLs, tags and JSON', async () => {
+    const agent = createFakeAgent({ agentCapabilities: { mcpCapabilities: { http: true } } });
+    const rosterLine = '{"id":"cindy-demo","command":"/plan","recall":"Run /learn before https://example.com/plan"}';
+    const roster = vi.fn(() => `<ghost-roster>\n${rosterLine}\n</ghost-roster>`);
+    const truncatedPrefix = 'a'.repeat(274);
+    const skills = vi.fn(async () => [
+      {
+        name: 'cindy-plugin-demo:helper',
+        description: [
+          'Use /learn, /skill:learn, `/plan`, (/goal), or 输入/compact.',
+          'Keep https://example.com/plan, /docx/, `/page/<token>`, /Users/me/plan, Docx / Wiki, URL/token, 输入/输出, </note>.',
+        ].join(' '),
+        path: '/skills/pr/SKILL.md',
+      },
+      {
+        name: 'cutoff-check',
+        description: `${truncatedPrefix} /plan/sub`,
+        path: '/skills/cutoff/SKILL.md',
+      },
+    ]);
+    const handle = await briefingEngine(agent, roster, skills).startSession({
+      workingDir: '/repo', model: '', providerId: 'acp-plugin:agy:agy',
+    });
+    const [briefing] = await firstPrompt(agent, handle);
+    const text = briefing!.text;
+
+    expect(text).toContain('Use ／learn, ／skill:learn, `／plan`, (／goal), or 输入／compact.');
+    expect(text).toContain('Keep https://example.com/plan, /docx/, `/page/<token>`, /Users/me/plan, Docx / Wiki, URL/token, 输入/输出, </note>.');
+    expect(text).toContain(`${truncatedPrefix} ／plan ("/skills/cutoff/SKILL.md")`);
+    expect(text).toContain('- cindy-plugin-demo:helper:');
+    expect(text).toContain('("/skills/pr/SKILL.md")');
+    expect(text).toContain('<cindy-skills>');
+    expect(text).toContain('</cindy-skills>');
+    expect(text).toContain('<ghost-roster>');
+    expect(text).toContain('</ghost-roster>');
+
+    const rosterJsonLine = text.split('\n').find((line) => line.startsWith('{"id":"cindy-demo"'));
+    expect(rosterJsonLine).toBeDefined();
+    expect(JSON.parse(rosterJsonLine!)).toEqual({
+      id: 'cindy-demo',
+      command: '／plan',
+      recall: 'Run ／learn before https://example.com/plan',
+    });
+  });
+
   it('keeps a companion on its own capability set: no roster or Skill list', async () => {
     const agent = createFakeAgent({ agentCapabilities: { mcpCapabilities: { http: true } } });
     const roster = vi.fn(() => '<ghost-roster></ghost-roster>');

@@ -34,16 +34,33 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Neutralize standalone `/command` tokens in briefing prose (e.g. `/learn`, `/plan`,
+ * `/skill:learn`) with a fullwidth solidus `／` so external ACP engines that scan
+ * incoming prompts for their own slash commands do not mistake Cindy's capability
+ * briefing for a user-invoked command. Preserves URLs (`https://a/b`), multi-segment
+ * paths (`/usr/bin`, `/docx/`, `/page/<token>`), XML closing tags (`</tag>`), word
+ * ratios (`URL/token`), and CJK separators (`输入/输出`).
+ */
+const BRIEFING_SLASH_COMMAND_RE =
+  /(^|[^A-Za-z0-9._~:/\\<])\/([A-Za-z][A-Za-z0-9_:-]*)(?![A-Za-z0-9_:/\\-])/g;
+
+export function sanitizePluginEngineBriefingText(value: string): string {
+  return value.replace(BRIEFING_SLASH_COMMAND_RE, '$1／$2');
+}
+
 /** The Skill list as one text block; empty when there is no Skill with a readable file. */
 export function formatPluginEngineSkillList(skills: readonly PluginEngineBriefingSkill[]): string {
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const skill of [...skills].sort((a, b) => a.name.localeCompare(b.name))) {
-    const name = oneLine(skill.name);
+    const name = sanitizePluginEngineBriefingText(oneLine(skill.name));
     const file = skill.path?.trim();
     if (!name || !file || seen.has(file)) continue;
     seen.add(file);
-    const description = skill.description ? oneLine(skill.description).slice(0, SKILL_DESCRIPTION_MAX_CHARS) : '';
+    const description = skill.description
+      ? sanitizePluginEngineBriefingText(oneLine(skill.description).slice(0, SKILL_DESCRIPTION_MAX_CHARS))
+      : '';
     lines.push(`- ${name}${description ? `: ${description}` : ''} (${JSON.stringify(file)})`);
     if (lines.length >= SKILL_LIST_MAX_ITEMS) break;
   }
@@ -68,7 +85,9 @@ export function renderPluginEngineCapabilityBriefing(
   acceptedMcpServers: readonly string[],
 ): string {
   return [
-    acceptedMcpServers.includes(CINDY_PLUGIN_GATEWAY_MCP_SERVER) ? input.pluginRoster.trim() : '',
+    acceptedMcpServers.includes(CINDY_PLUGIN_GATEWAY_MCP_SERVER)
+      ? sanitizePluginEngineBriefingText(input.pluginRoster.trim())
+      : '',
     formatPluginEngineSkillList(input.skills),
   ].filter(Boolean).join('\n\n');
 }
