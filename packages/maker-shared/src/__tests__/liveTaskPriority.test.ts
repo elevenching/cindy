@@ -123,4 +123,3 @@ it('excludes individually pinned tasks from every inbox section regardless of st
   expect(taskInboxSection({ pinnedAt, snoozedUntil: new Date(now + 3600000).toISOString() }, { running: false, waiting: false }, now)).toBeNull();
   expect(taskInboxSection({ pinnedAt, status: 'archived' }, { running: false, waiting: false }, now)).toBeNull();
 });
-

@@ -46,8 +46,13 @@ export {
 } from './acp-agent.js';
 export {
   CINDY_PLUGIN_GATEWAY_MCP_SERVER,
+  collectPluginEngineSkillNames,
+  defusePluginEngineHandoffPrefix,
+  defusePluginEngineSlashMentions,
+  defusePluginEngineWireEnvelope,
   formatPluginEngineSkillList,
+  isLeadingSlashCommand,
   renderPluginEngineCapabilityBriefing,
-  sanitizePluginEngineBriefingText,
   type PluginEngineBriefingSkill,
+  type PluginEngineWireMessage,
 } from './briefing.js';

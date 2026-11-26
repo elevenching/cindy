@@ -10,6 +10,8 @@
  *   中转给出的不安全存储请求被客户端拒绝；存储不可达时（含经中转下载）返回可重试的 503 MEDIA_STORAGE_UNAVAILABLE；
  *   删除前签发、删除后才到达的写入由过期清理在授权失效后删除；客户端连不上存储时上传下载回退到中转。
  *   最小失败输入：1 MiB + 5311 字节附件，跨 AEAD 块边界 seek；删除后再用旧地址写入第一块。
+ * - 分享限流（2026-11-26 cooker02 生成分享链接 429）：中转不读回环 ingress 追加的客户端，自建中转的所有访客共用一个
+ *   180 次/分钟的桶。最小失败输入：同一设备第 181 次请求（旧实现返回 200）；同时断言 Retry-After、按来源 1200 次与脱敏日志。
  * - tier：integration，必须经真实本地 socket 与临时磁盘，禁止用 handler mock 代替。
  * - 实测耗时：2026-11-14 本机整文件约 13 秒（真实 socket 与磁盘的集成用例；附件直传部分约 2 秒）。
  */
@@ -34,7 +36,8 @@ import { generateIdentity, issueCertificate, publicBytes, createJoinRequest, app
 import { AppError } from '@cindy/device-link-sharing/errors';
 import { AgentNetClient, authorization, submitJoin, pollJoin, submitTenantJoin, pollTenantJoin, encryptMedia, decryptMedia, type AgentNetUplink } from '../client.js';
 import { uploadEncryptedMedia, openEncryptedMedia } from '../media.js';
-import { encodeUdpRegister, encodeUdpUp, udpRelayPeerHash, verifyUdpDown, verifyUdpRegisterAck, type UdpRelayCredentials } from '../udpRelay.js';
+import { UDP_RELAY_PROBE_BYTES, UDP_RELAY_PROBE_FEATURE, encodeUdpProbe, encodeUdpRegister, encodeUdpUp, udpRelayPeerHash,
+  verifyUdpDown, verifyUdpProbeAck, verifyUdpRegisterAck, type UdpRelayCredentials } from '../udpRelay.js';
 import { createHash } from 'node:crypto';
 
 // Integration: HTTPS and UDP can sit behind different load balancers. /info must
@@ -47,6 +50,50 @@ it('advertises a configured STUN host next to the bound UDP port', async () => {
   expect(await (await fetch(split.relay.url + API + '/info')).json())
     .toMatchObject({ udpPort: split.relay.udpAddress?.port, stunHost: 'agent-net-stun.example.test' });
   await expect(startAgentNetRelay({ dataDir: split.dataDir, udpPort: 0, stunHost: 'agent-net-stun.example.test:3479' })).rejects.toThrow('INVALID_STUN_HOST');
+});
+
+// 2026-11-26 cooker02 share-link 429 (official relay; this self-hosted copy had the same shape): the relay never read
+// the client the loopback ingress appends, so every guest of a self-hosted relay shared one 180/min bucket; refusals
+// carried no Retry-After and left no record. A verified device now has its own budget, the per-address bucket only
+// stops floods, and refusals say when to retry and are logged redacted.
+it('limits sharing per verified device and per forwarded client, answers with Retry-After and logs redacted', async () => {
+  let networkId = '';
+  const warnings: Record<string, unknown>[] = [];
+  const f = await fixture({ logger: { info() {}, error() {}, warn: fields => { warnings.push(fields); } }, sharing: {
+    async authenticate(req) {
+      const device = req.headers['x-unit-device'];
+      if (typeof device !== 'string') throw new AppError('UNAUTHORIZED', 401, 'No scoped card');
+      return { accountId: 'owner-account', deviceId: device, networkId };
+    },
+    providers: { hostCapability: 'provider-share-v1', identityCards: {
+      async verify() { throw new Error('Unused'); }, async inspect() { throw new Error('Unused'); },
+    } },
+  } });
+  networkId = f.bootstrap.networkId;
+  const request = (client: string, device?: string) => fetch(f.relay.url + API + '/sharing/shared-tasks', {
+    headers: { 'x-forwarded-for': '198.51.100.9, ' + client, ...(device ? { 'x-unit-device': device } : {}) },
+  });
+  const burst = async (count: number, client: string, device?: string) => {
+    const statuses: number[] = [];
+    for (let sent = 0; sent < count; sent += 100) statuses.push(...await Promise.all(
+      Array.from({ length: Math.min(100, count - sent) }, () => request(client, device).then(r => r.status))));
+    return statuses;
+  };
+  expect(await burst(180, '192.0.2.1', 'device-a')).not.toContain(429);
+  const refused = await request('192.0.2.3', 'device-a');
+  expect(refused.status).toBe(429);
+  expect(Number(refused.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+  expect(Number(refused.headers.get('retry-after'))).toBeLessThanOrEqual(60);
+  expect((await request('192.0.2.1', 'device-b')).status).not.toBe(429);
+  // 181 requests so far from 192.0.2.1; its address bucket holds 1200.
+  expect(await burst(1019, '192.0.2.1')).toEqual(Array(1019).fill(401));
+  expect((await request('192.0.2.1')).status).toBe(429);
+  expect((await request('192.0.2.2')).status).toBe(401);
+  expect(warnings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ limit: 'sharing-device', maximum: 180 }),
+    expect.objectContaining({ limit: 'sharing', subject: '192.0.2.0/24', maximum: 1200 }),
+  ]));
+  expect(JSON.stringify(warnings)).not.toMatch(/device-a|owner-account|192\.0\.2\.1\b/);
 });
 
 // Bug: opaque media storage alone did not protect App attachments or authenticated video seeks.
@@ -860,6 +907,59 @@ describe('independent V2 relay', () => {
     await vi.waitFor(() => expect(wsTags).toEqual([1, 2, 3, 4, 10, 11, 13]));
     expect(member.downs().map((down) => down.datagram[0]).sort()).toEqual([5, 6, 7]);
     expect(elsewhere.downs()).toEqual([]);
+  });
+
+  // Integration (2026-11-25): clients verify hop-1 full-size UDP reachability directly with the relay
+  // (0xE5/0xE6) instead of inferring hop-1 health from end-to-end peer retransmits. Smallest failing input:
+  // one unproven probe (must be ignored), one proven 1350B probe (must return non-amplifying 1342B ack),
+  // plus replayed/tampered/wrong-key probes (must be dropped). Tier: integration.
+  it('answers full-size UDP probes only for proven addresses with non-amplifying acks and rejects replays or tampering', async () => {
+    const f = await fixture();
+    const info = await (await fetch(f.relay.url + API + '/info')).json() as { features: string[] };
+    expect(info.features).toContain(UDP_RELAY_PROBE_FEATURE);
+    const a = await f.client.connect(); f.uplinks.push(a);
+    expect(a.udp?.probe).toBe(true);
+
+    const openUdp = async (credentials: UdpRelayCredentials) => {
+      const socket = createSocket('udp4'); cleanups.push(() => { socket.close(); });
+      await new Promise<void>((resolve) => socket.bind(0, '127.0.0.1', resolve));
+      const received: Buffer[] = []; socket.on('message', (packet) => received.push(packet));
+      const send = (packet: Uint8Array) => socket.send(packet, f.relay.udpAddress!.port, '127.0.0.1');
+      const regAcks = () => received.map((p) => verifyUdpRegisterAck(p, credentials)).filter((v) => v !== null);
+      const probeAcks = () => received.map((p) => verifyUdpProbeAck(p, credentials)).filter((v) => v !== null);
+      return { received, send, regAcks, probeAcks };
+    };
+    const owner = await openUdp(a.udp!);
+    const elsewhere = await openUdp(a.udp!);
+
+    // Before the address is proven, full-size probes must be ignored (zero amplification to unproven sources).
+    owner.send(encodeUdpProbe(a.udp!, 1n));
+    owner.send(encodeUdpRegister(a.udp!, 1n, false));
+    await vi.waitFor(() => expect(owner.regAcks()).toHaveLength(1));
+    expect(owner.probeAcks()).toEqual([]);
+
+    // Prove the address via cookie, even with receiving=false (probing during suspension).
+    owner.send(encodeUdpRegister(a.udp!, 2n, false, owner.regAcks()[0].cookie));
+    await vi.waitFor(() => expect(owner.regAcks().at(-1)).toMatchObject({ counter: 2n, proven: true }));
+
+    // A probe from another unproven socket with valid credentials is still ignored.
+    elsewhere.send(encodeUdpProbe(a.udp!, 2n));
+    // Tampered padding and wrong key are ignored; a valid 1350B probe gets a strictly shorter 1342B ack.
+    const tampered = encodeUdpProbe(a.udp!, 3n); tampered[tampered.length - 1] ^= 1;
+    owner.send(tampered);
+    owner.send(encodeUdpProbe({ session: a.udp!.session, key: Buffer.alloc(32, 9) }, 4n));
+    const valid = encodeUdpProbe(a.udp!, 5n, UDP_RELAY_PROBE_BYTES);
+    owner.send(valid);
+    await vi.waitFor(() => expect(owner.probeAcks()).toHaveLength(1));
+    expect(owner.probeAcks()[0]).toEqual({ counter: 5n, size: UDP_RELAY_PROBE_BYTES - 8 });
+    expect(owner.probeAcks()[0].size).toBeLessThan(valid.length);
+
+    // Replayed or older counter is dropped; a newer counter is answered.
+    owner.send(valid);
+    owner.send(encodeUdpProbe(a.udp!, 4n));
+    owner.send(encodeUdpProbe(a.udp!, 6n));
+    await vi.waitFor(() => expect(owner.probeAcks().map((ack) => ack.counter)).toEqual([5n, 6n]));
+    expect(elsewhere.received).toEqual([]);
   });
 
   // Integration: a phone must be able to verify the authenticated WebSocket
