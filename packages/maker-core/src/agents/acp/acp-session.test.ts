@@ -134,17 +134,24 @@ function createFakeAgent(options: FakeAgentOptions = {}) {
       for (const listener of [...lineListeners]) listener(line);
     },
     requestPermission(params: AcpRecord): Promise<AcpRecord> {
-      const id = nextAgentRequestId++;
-      return new Promise((resolve) => {
-        pendingAgentRequests.set(id, resolve);
-        toClient({ jsonrpc: '2.0', id, method: 'session/request_permission', params: { sessionId: 'sess-1', ...params } });
-      });
+      return requestClient('session/request_permission', params);
+    },
+    requestForm(params: AcpRecord): Promise<AcpRecord> {
+      return requestClient('elicitation/create', params);
     },
     exit() {
       closed = true;
       for (const listener of [...closeListeners]) listener({ reason: 'peer-exited', detail: 'exit code 1' });
     },
   };
+
+  function requestClient(method: string, params: AcpRecord): Promise<AcpRecord> {
+    const id = nextAgentRequestId++;
+    return new Promise((resolve) => {
+      pendingAgentRequests.set(id, resolve);
+      toClient({ jsonrpc: '2.0', id, method, params: { sessionId: 'sess-1', ...params } });
+    });
+  }
 }
 
 type FakeAgent = ReturnType<typeof createFakeAgent>;
@@ -215,7 +222,7 @@ describe('openAcpSession handshake', () => {
     const [initialize, sessionNew] = agent.sent;
     expect(initialize).toMatchObject({
       method: 'initialize',
-      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } },
+      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } } },
     });
     expect(sessionNew).toMatchObject({ method: 'session/new', params: { cwd: '/work/project' } });
     expect((sessionNew.params as AcpRecord).mcpServers).toEqual([{ name: 'local', command: '/bin/tool', args: [], env: [] }]);
@@ -1578,4 +1585,62 @@ describe('AcpAgent (the acp engine)', () => {
     expect(handle.model).toBe('first');
     await handle.close();
   });
+});
+
+
+// Real Antigravity request shape. Existing ACP tests cover permissions, but do
+// not catch a native question being rendered as text or returning display labels.
+describe('ACP native question forms', () => {
+  const form = {
+    mode: 'form',
+    toolCallId: 'ask-question',
+    message: 'The agent has a question.',
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        q1: { type: 'string', title: 'Tea or Coffee?', oneOf: [
+          { const: '1', title: 'Tea' }, { const: '2', title: 'Coffee' },
+        ] },
+        q1_other: { type: 'string', title: 'Other', description: 'Optional free-form answer to: Tea or Coffee?' },
+      },
+    },
+  };
+
+  it.each([
+    ['Coffee', { action: 'accept', content: { q1: '2' } }],
+    ['Water', { action: 'accept', content: { q1_other: 'Water' } }],
+    ['', { action: 'decline' }],
+  ])('converts the card answer %j back to the form response', async (answer, response) => {
+    const agent = createFakeAgent();
+    const { session } = await open(agent);
+    const resolver = vi.fn(async (_request: InteractionRequest): Promise<InteractionDecision> => ({
+      kind: 'ask_user_question', answers: answer ? { q1: answer } : {},
+    }));
+    session.setInteractionResolver(resolver);
+    await expect(agent.requestForm(form)).resolves.toEqual(response);
+    expect(resolver.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'ask_user_question', toolUseId: 'ask-question',
+      questions: [{ id: 'q1', options: [{ label: 'Tea' }, { label: 'Coffee' }] }],
+    });
+    await session.close();
+  });
+
+  it('cancels an unanswered form when the user stops the turn', async () => {
+    const agent = createFakeAgent();
+    const { session } = await open(agent);
+    const shown = deferred<AbortSignal>();
+    session.setInteractionResolver((_request, signal) => {
+      shown.resolve(signal!);
+      return new Promise<InteractionDecision>(() => {});
+    });
+    await session.send({ type: 'user', content: 'go' });
+    const answer = agent.requestForm(form);
+    const signal = await shown.promise;
+    await session.abort();
+    expect(signal.aborted).toBe(true);
+    await expect(answer).resolves.toEqual({ action: 'cancel' });
+    agent.prompts[0]!.settle.resolve({ stopReason: 'cancelled' });
+    await session.close();
+  });
+
 });

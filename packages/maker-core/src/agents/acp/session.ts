@@ -27,7 +27,8 @@ import {
   findModelOption,
   mapEffortValues,
 } from './capabilities.js';
-import { AcpConnection, AcpConnectionClosedError, AcpRpcError, methodNotFound } from './connection.js';
+import { AcpConnection, AcpConnectionClosedError, AcpHandlerError, AcpRpcError, methodNotFound } from './connection.js';
+import { parseQuestionForm } from './elicitation.js';
 import type { AcpLineTransport, AcpTransportClosed } from './line-transport.js';
 import {
   ACP_ERROR_AUTH_REQUIRED,
@@ -276,7 +277,7 @@ export async function openAcpSession(opts: OpenAcpSessionOptions): Promise<AcpSe
     const init = normalizeInitializeResult(await connection.request('initialize', {
       protocolVersion: ACP_PROTOCOL_VERSION,
       // Phase 1 lets the agent read/write files and run commands itself.
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } },
       clientInfo: { name: opts.clientInfo.name, version: opts.clientInfo.version, ...(opts.clientInfo.title ? { title: opts.clientInfo.title } : {}) },
     }));
     if (init.protocolVersion !== ACP_PROTOCOL_VERSION) throw new AcpProtocolVersionError(init.protocolVersion);
@@ -421,7 +422,7 @@ export class AcpSession {
   private pendingBriefing: string | null;
   private sendChain: Promise<void> = Promise.resolve();
   private stopGeneration = 0;
-  private readonly permissionControllers = new Set<AbortController>();
+  private readonly interactionControllers = new Set<AbortController>();
   private readonly capabilityListeners = new Set<(capabilities: Capabilities) => void>();
   private configOptions: AcpConfigOption[];
   private readonly requireSelectedModel: boolean;
@@ -433,6 +434,7 @@ export class AcpSession {
   private resolver: InteractionResolver | null = null;
   private turn: ActiveTurn | null = null;
   private turnSeq = 0;
+  private questionSeq = 0;
   private permissionSeq = 0;
   private usage: UsageSnapshot = { tokenUsage: 0, contextTokens: 0, contextWindow: 0, costUsd: 0 };
   private title: string | undefined;
@@ -636,7 +638,7 @@ export class AcpSession {
       this.finishTurn(turn.token, { stopReason: 'cancelled' });
     }, this.cancelGraceMs);
     // ACP also expects cancelled responses to permission requests that arrive during the grace period.
-    this.cancelPermissions();
+    this.cancelInteractions();
     this.connection.notify('session/cancel', { sessionId: this.id });
   }
 
@@ -769,6 +771,12 @@ export class AcpSession {
     if (method === 'session/request_permission' && params.sessionId === this.id) {
       return { outcome: await this.decidePermission(params, signal) };
     }
+    if (method === 'elicitation/create') {
+      if (params.sessionId !== this.id || params.requestId !== undefined) {
+        throw new AcpHandlerError(-32602, 'ACP question must belong to this session');
+      }
+      return this.answerQuestionForm(params, signal);
+    }
     // fs/* and terminal/* are not advertised in phase 1.
     throw methodNotFound(method);
   }
@@ -801,7 +809,7 @@ export class AcpSession {
     if (!turn || turn.token !== token || turn.settled) return;
     turn.settled = true;
     if (turn.cancelTimer) clearTimeout(turn.cancelTimer);
-    this.cancelPermissions();
+    this.cancelInteractions();
     this.turn = null;
     // Turn-closing events belong to the turn that just ended, so they are not tagged background.
     for (const event of this.translator.finish(outcome)) this.queue.push(event);
@@ -884,6 +892,33 @@ export class AcpSession {
     }
   }
 
+  private async answerQuestionForm(params: AcpRecord, signal: AbortSignal): Promise<unknown> {
+    const form = parseQuestionForm(params);
+    const resolver = this.resolver;
+    if (!resolver || signal.aborted || this.closing || this.turn?.cancelTimer) return { action: 'cancel' };
+
+    const controller = new AbortController();
+    const forwardAbort = (): void => controller.abort();
+    signal.addEventListener('abort', forwardAbort, { once: true });
+    this.interactionControllers.add(controller);
+    try {
+      const decision = await untilAborted(resolver({
+        kind: 'ask_user_question',
+        requestId: `acp-question-${++this.questionSeq}`,
+        toolUseId: asNonEmptyString(params.toolCallId),
+        questions: form.questions,
+      }, controller.signal), controller.signal);
+      if (decision === ABORTED || controller.signal.aborted || decision.kind !== 'ask_user_question' || decision.dismissed) {
+        return { action: 'cancel' };
+      }
+      const content = form.read(decision.answers);
+      return content && Object.keys(content).length ? { action: 'accept', content } : { action: 'decline' };
+    } finally {
+      signal.removeEventListener('abort', forwardAbort);
+      this.interactionControllers.delete(controller);
+    }
+  }
+
   private async decidePermission(params: AcpRecord, signal: AbortSignal): Promise<AcpPermissionOutcome> {
     if (signal.aborted || this.closing || this.turn?.cancelTimer) return { outcome: 'cancelled' };
     const options = normalizePermissionOptions(params.options);
@@ -899,7 +934,7 @@ export class AcpSession {
     const controller = new AbortController();
     const forwardAbort = (): void => controller.abort();
     signal.addEventListener('abort', forwardAbort, { once: true });
-    this.permissionControllers.add(controller);
+    this.interactionControllers.add(controller);
     const input = toolCall.rawInput;
     const request: InteractionRequest = {
       kind: 'permission',
@@ -929,13 +964,13 @@ export class AcpSession {
       return selected(reject);
     } finally {
       signal.removeEventListener('abort', forwardAbort);
-      this.permissionControllers.delete(controller);
+      this.interactionControllers.delete(controller);
     }
   }
 
-  private cancelPermissions(): void {
-    for (const controller of this.permissionControllers) controller.abort();
-    this.permissionControllers.clear();
+  private cancelInteractions(): void {
+    for (const controller of this.interactionControllers) controller.abort();
+    this.interactionControllers.clear();
   }
 
   private async setConfigValue(configId: string, value: string): Promise<void> {

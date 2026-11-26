@@ -255,3 +255,14 @@ method-not-found 时本会话撤回插话能力，之后的插话排队。
 不新增 channel、中转帧或字段，自建中转原样转发，无需同步修改。
 实现见 desktop `maker-ipc/register.ts`、maker-core `agents/acp/acp-agent.ts`、host `agent/agent-skills.ts`；回归见
 `acp-session.test.ts`「lists for the `/` menu」、renderer `slashCommands.test.ts`「plugin engine Skills」与 host `boundary.test.mjs`「25b L1」。
+
+## ACP 原生提问
+
+Cindy 在 ACP v1 握手时通过 `clientCapabilities.elicitation.form` 声明会话表单能力。
+`elicitation/create` 必须属于当前会话。执行器将文本和单选字段交给既有提问卡，
+选项显示名称映射回协议值。Antigravity 的可选 `qN_other` 字段并入同一道题的自由输入。
+有有效答案时返回 `accept`，跳过整份表单时返回 `decline`，停止、断连或撤回时取消等待。
+暂不支持的字段和模式返回无效参数，避免提交与原字段类型不符的内容。
+
+旧版 Cindy 未声明该能力，Antigravity 继续使用聊天文字提问。此能力沿用既有提问交互，
+无需调整插件清单、安装、批准状态或设备连接协议。
