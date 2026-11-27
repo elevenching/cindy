@@ -5,6 +5,7 @@
 
 import {
   CalendarDays,
+  createLucideIcon,
   ChartColumn,
   Code,
   ContactRound,
@@ -21,6 +22,11 @@ import {
 } from 'lucide-react';
 
 import type { GhostMainViewDecl, GhostMainViewIcon } from '../../shared/ghost';
+
+export const BuildrNavigationIcon = createLucideIcon('BuildrNavigation', [
+  ['path', { d: 'm5 9 7-5 7 4v4l-3 2-4-2 7 4v3l-7 3-7-4v-6', key: 'outline' }],
+  ['path', { d: 'm5 9 3 2m0-3 7-4m-3 14 4-2', key: 'folds' }],
+]);
 
 export const MAIN_VIEW_ICONS = {
   puzzle: Puzzle,

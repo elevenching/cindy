@@ -93,6 +93,21 @@ describe('globalTabs', () => {
     expect(getGlobalTabsSnapshot().dismissedInstanceIds).toEqual([]);
   });
 
+  // Unit: old unowned Buildr tabs must not appear in any conversation after upgrade.
+  it('removes only the legacy global workspace page when reconciling installed plugins', () => {
+    const workspace = { manifest: { id: 'buildr-workspace', mainView: { workspaceWeb: 'http://127.0.0.1:4458' } } };
+    const ordinary = { manifest: { id: 'ordinary' } };
+    const prior = addGlobalPluginTab('buildr-workspace', { view: 'main' })!;
+    const other = addGlobalPluginTab('ordinary')!;
+    setActiveGlobalTabId(prior.id);
+
+    reconcileGlobalPluginTabs([workspace, ordinary] as unknown as Parameters<typeof reconcileGlobalPluginTabs>[0]);
+    expect(getGlobalTabs()).toEqual([other]);
+    expect(getActiveGlobalTabId()).toBeNull();
+    __resetGlobalTabsForTest();
+    expect(getGlobalTabs()).toEqual([other]);
+  });
+
   it('reorders only with a complete id list and picks up writes from other windows', () => {
     const a = addGlobalPluginTab('alpha')!;
     const b = addGlobalPluginTab('beta')!;

@@ -20,11 +20,14 @@ interface Props {
   visible?: boolean;
 }
 
-function WorkspaceGuest({ instanceId, url, sidebar }: { instanceId: string; url: string; sidebar: boolean }) {
+function WorkspaceGuest({ instanceId, url, sidebar, resolveAgain }: {
+  instanceId: string; url: string; sidebar: boolean; resolveAgain: () => Promise<boolean>;
+}) {
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   useEffect(() => {
     const host = container.current;
     if (!host) return;
@@ -61,7 +64,15 @@ function WorkspaceGuest({ instanceId, url, sidebar }: { instanceId: string; url:
       {failed && (
         <div className="p-4">
           <ErrorNotice message={t('workspaceWeb.unavailable')} actions={
-            <Button variant="secondary" onClick={() => { setFailed(false); setAttempt(value => value + 1); }}>
+            <Button variant="secondary" disabled={retrying} onClick={() => {
+              setRetrying(true);
+              void resolveAgain().then(ready => {
+                if (ready) {
+                  setFailed(false);
+                  setAttempt(value => value + 1);
+                }
+              }).finally(() => setRetrying(false));
+            }}>
               {t('workspaceWeb.retry')}
             </Button>
           } />
@@ -74,20 +85,26 @@ function WorkspaceGuest({ instanceId, url, sidebar }: { instanceId: string; url:
 export function GhostWorkspaceWebBody({ instanceId, sessionId, directoryKey, mode, visible = true }: Props) {
   const { t } = useTranslation();
   const [resolutions, setResolutions] = useState<ReadonlyMap<string, GhostWorkspaceWebPage | null>>(() => new Map());
+  const [resolveAttempt, setResolveAttempt] = useState(0);
   const [guests, setGuests] = useState<ReadonlyMap<string, GhostWorkspaceWebPage>>(() => new Map());
   const key = JSON.stringify([instanceId, sessionId === null ? null : directoryKey || sessionId]);
   const resolved = resolutions.get(key);
-  const retry = () => setResolutions(previous => {
-    const next = new Map(previous);
-    next.delete(key);
-    return next;
-  });
+  const retry = () => {
+    setResolutions(previous => {
+      const next = new Map(previous);
+      next.delete(key);
+      return next;
+    });
+    setResolveAttempt(attempt => attempt + 1);
+  };
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
   useEffect(() => {
     let live = true;
-    if (!visible || resolved !== undefined || (mode === 'sidebar' && sessionIdRef.current === null)) return;
+    // A retained guest can outlive the local service. Check again whenever
+    // the user reveals its tab, without reloading a healthy guest.
+    if (!visible || (mode === 'sidebar' && sessionIdRef.current === null)) return;
     const updateResolution = (page: GhostWorkspaceWebPage | null) => {
       if (live) setResolutions(previous => new Map(previous).set(key, page));
     };
@@ -108,7 +125,7 @@ export function GhostWorkspaceWebBody({ instanceId, sessionId, directoryKey, mod
       () => updateResolution(null),
     );
     return () => { live = false; };
-  }, [instanceId, key, mode, resolved, visible]);
+  }, [instanceId, key, mode, resolveAttempt, visible]);
 
   const unavailable = mode === 'sidebar' && (sessionId === null || resolved?.workspaceId === null);
   const active = !unavailable && resolved ? resolved.workspaceId ?? resolved.url : null;
@@ -116,7 +133,14 @@ export function GhostWorkspaceWebBody({ instanceId, sessionId, directoryKey, mod
     <div className="relative h-full min-h-0 w-full flex-1 overflow-hidden">
       {[...guests].map(([guestKey, page]) => (
         <div key={guestKey} hidden={guestKey !== active} className="absolute inset-0">
-          <WorkspaceGuest instanceId={instanceId} url={page.url} sidebar={mode === 'sidebar'} />
+          <WorkspaceGuest instanceId={instanceId} url={page.url} sidebar={mode === 'sidebar'}
+            resolveAgain={async () => {
+              try {
+                return !!await window.electronAPI?.ghosts?.resolveWorkspaceWeb?.(instanceId, sessionIdRef.current);
+              } catch {
+                return false;
+              }
+            }} />
         </div>
       ))}
       {unavailable ? (

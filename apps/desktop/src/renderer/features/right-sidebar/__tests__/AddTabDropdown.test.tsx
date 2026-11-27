@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import type { RenderOptions } from '@testing-library/react';
 import { createRef, type ReactNode } from 'react';
-import { act, cleanup, fireEvent, render as testingRender, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AddTabDropdown } from '../AddTabDropdown';
 import { DetachedBotMenuOwnerContext } from '../botMenuOwnerContext';
@@ -13,7 +13,8 @@ import { useTabCreationMenu } from '../lib/useTabCreationMenu';
 import type { TabCreationSelectionOptions } from '../lib/useTabCreationMenu';
 import type { SideChatTabPlacement } from '../lib/openSideChatTab';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
-import { __resetGlobalTabsForTest } from '../globalTabs';
+import { getBucket } from '../store';
+import { __resetGlobalTabsForTest, getGlobalTabs } from '../globalTabs';
 import { __resetTabGroupsForTest, getTabGroup } from '../tabGroups';
 import { _resetTabKindRegistry, registerTabKind, unregisterTabKind } from '../registry';
 import type { TabKindId, TabKindMenuMeta } from '../types';
@@ -255,25 +256,36 @@ it.each(['menu', 'empty'])('opens plugins in the selected group and reports exis
 
 // Unit, workspace-plugin-page. Ordinary plugin tests do not cover a workspace
 // web app appearing ahead of built-ins on both entry surfaces.
-it('puts an approved workspace web app first and opens the same global tab from either surface', () => {
+it('opens workspace web from either menu and keeps its tab in the chosen conversation', async () => {
   m.ghosts = [{
     enabled: true,
     approval: { state: 'approved' },
     manifest: {
-      id: 'buildr', name: 'Buildr', sessionContext: true, node: { entry: 'worker.cjs' },
+      id: 'buildr-workspace', name: 'Buildr', sessionContext: true, node: { entry: 'worker.cjs' },
       preview: { hosts: ['127.0.0.1'] },
       mainView: { title: 'Buildr', html: 'compat.html', workspaceWeb: 'http://127.0.0.1:4458' },
     },
   }];
   const onGlobalTabSelected = vi.fn();
-  render(<Entries sessionId="task-1" onSelect={vi.fn()} onGlobalTabSelected={onGlobalTabSelected} both />);
+  const view = render(<Entries sessionId="workspace-task-1" onSelect={vi.fn()} onGlobalTabSelected={onGlobalTabSelected} both />);
   const menu = within(screen.getByTestId('menu'));
   const empty = within(screen.getByTestId('empty'));
-  for (const scope of [menu, empty]) {
+  for (const [index, scope] of [menu, empty].entries()) {
     const buildr = scope.getByRole('button', { name: /^Buildr/ });
     expect(scope.getAllByRole('button')[0]).toBe(buildr);
+    expect(buildr.querySelector('svg.lucide-buildr-navigation')).toBeTruthy();
     fireEvent.click(buildr);
+    await waitFor(() => expect(onGlobalTabSelected).toHaveBeenCalledTimes(index + 1));
   }
   expect(onGlobalTabSelected.mock.calls[0]?.[1]).toBe(false);
   expect(onGlobalTabSelected.mock.calls[1]).toEqual([onGlobalTabSelected.mock.calls[0]?.[0], true]);
+  expect(getGlobalTabs()).toEqual([]);
+  const first = getBucket('workspace-task-1').tabs[0];
+  expect(first).toMatchObject({ kind: 'plugin-view', state: { instanceId: 'buildr-workspace', view: 'main' } });
+  view.rerender(<Entries sessionId="workspace-task-2" onSelect={vi.fn()} />);
+  expect(getBucket('workspace-task-2').tabs).toEqual([]);
+  fireEvent.click(within(screen.getByTestId('menu')).getByRole('button', { name: /^Buildr/ }));
+  await waitFor(() => expect(getBucket('workspace-task-2').tabs).toHaveLength(1));
+  expect(getBucket('workspace-task-2').tabs[0]?.id).not.toBe(first?.id);
+  expect(getBucket('workspace-task-1').tabs).toEqual([first]);
 });

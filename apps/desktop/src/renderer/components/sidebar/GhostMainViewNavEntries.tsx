@@ -39,7 +39,7 @@ const RAIL_ACTIVE_CLASS =
   '[--button-face-bg:var(--chat-input-chip-bg)] text-[var(--msg-assistant-text)] enabled:hover:[--button-face-bg:var(--chat-input-chip-bg)] enabled:active:[--button-face-bg:var(--chat-input-chip-bg)]';
 
 export { MAIN_VIEW_ICONS } from '@/cindy-brain/mainViewIcons';
-import { MAIN_VIEW_ICONS } from '@/cindy-brain/mainViewIcons';
+import { BuildrNavigationIcon, MAIN_VIEW_ICONS } from '@/cindy-brain/mainViewIcons';
 
 /** Expanded and rail variants consume the exact same sorted visibility projection. */
 export function GhostMainViewNavEntries({ variant }: { variant: 'row' | 'rail' }) {
@@ -62,22 +62,9 @@ export function GhostMainViewNavEntry({
   const workspaceWeb = approvedGhostWorkspaceWebOrigin(item.installedGhost);
   const activeMatch = useMatch('/apps/:ghostId');
   const active = activeMatch?.params.ghostId === item.instanceId;
-  const Icon = MAIN_VIEW_ICONS[item.icon];
-  const iconSize = variant === 'row' ? 15 : 18;
-  const icon = workspaceWeb && item.ghostId === 'buildr-workspace' ? (
-    <svg aria-hidden="true" data-ink-icon="" width={iconSize} height={iconSize} viewBox="0 0 24 24"
-      className="shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="m5 9 7-5 7 4v4l-3 2-4-2 7 4v3l-7 3-7-4v-6" />
-      <path d="m5 9 3 2m0-3 7-4m-3 14 4-2" />
-    </svg>
-  ) : (
-    <Icon
-      aria-hidden="true"
-      size={iconSize}
-      strokeWidth={1.8}
-      className="shrink-0"
-    />
-  );
+  const Icon = workspaceWeb && item.ghostId === 'buildr-workspace'
+    ? BuildrNavigationIcon : MAIN_VIEW_ICONS[item.icon];
+  const icon = <Icon aria-hidden="true" data-ink-icon={Icon === BuildrNavigationIcon ? "" : undefined} size={variant === 'row' ? 15 : 18} strokeWidth={1.8} className="shrink-0" />;
   const openPage = () => navigate(`/apps/${encodeURIComponent(item.instanceId)}`);
   // 点击:已在侧边栏 / 窗口里就聚焦;否则按用户放置记忆 → 插件声明 → 内置默认(页面)。
   const open = () => {

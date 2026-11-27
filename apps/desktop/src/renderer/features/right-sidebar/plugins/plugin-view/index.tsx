@@ -26,7 +26,7 @@ import {
 } from '@/cindy-brain/ghostPanelBody';
 import { useGhostRuntimeState } from '@/cindy-brain/runtimeStates';
 import { useInstalledGhosts } from '@/cindy-brain/useInstalledGhosts';
-import { MAIN_VIEW_ICONS, mainViewIconName } from '@/cindy-brain/mainViewIcons';
+import { BuildrNavigationIcon, MAIN_VIEW_ICONS, mainViewIconName } from '@/cindy-brain/mainViewIcons';
 import type { InstalledGhost } from '../../../../../shared/ghost';
 import { installedGhostStoragePart } from '../../../../../shared/pluginIdentity';
 import {
@@ -54,6 +54,10 @@ function PluginViewTabPillTitle({ state, t }: { state: PluginViewTabState; t: TF
 
 function PluginViewTabPillIcon({ state }: { state: PluginViewTabState }) {
   const ghost = useInstalledGhostByInstance(state.instanceId);
+  if (ghost?.manifest.id === 'buildr-workspace' && effectivePluginView(state, ghost) === 'main' &&
+      approvedGhostWorkspaceWebOrigin(ghost)) {
+    return <BuildrNavigationIcon size={13} strokeWidth={1.8} aria-hidden="true" />;
+  }
   // 与 plugin-task 页签一致：插件有品牌图标时优先显示，否则回退到 mainView 系统图标
   if (ghost?.iconDataUrl) {
     // design: intrinsic-geometry — 插件品牌图沿用 plugin-task 页签同款 13px 内容裁剪（图标自身的圆角，不是控件边框）

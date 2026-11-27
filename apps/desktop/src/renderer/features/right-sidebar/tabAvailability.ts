@@ -1,3 +1,4 @@
+import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
 import type { InstalledGhost } from '../../../shared/ghost';
 import { getApprovedGhostHostUi } from '../../../shared/ghost';
 import { CINDY_MAKE_ENABLED } from '@cindy/maker-shared/cindy-make-feature';
@@ -26,6 +27,7 @@ export interface RightSidebarTabAvailability {
    * 电脑上时，只含声明了 `taskView.remote` 的插件。
    */
   pluginTaskGhosts?: readonly InstalledGhost[];
+  workspaceWebScope?: 'local' | 'global' | 'remote';
 }
 
 function isUnavailablePluginView(
@@ -38,7 +40,11 @@ function isUnavailablePluginView(
   const ghost = availability.pluginViewGhosts.find(
     (candidate) => installedGhostStoragePart(candidate) === instanceId,
   );
-  const viewId = (tab.state as PluginViewTabState | null)?.resourceViewId;
+  const state = tab.state as PluginViewTabState;
+  const viewId = state.resourceViewId;
+  if (ghost?.manifest.id === 'buildr-workspace' && ghost.manifest.mainView?.workspaceWeb && !viewId && state.view !== 'panel') {
+    return availability.workspaceWebScope !== 'local' || !approvedGhostWorkspaceWebOrigin(ghost);
+  }
   if (viewId) return !ghost || ghost.enabled === false ||
     !getApprovedGhostHostUi(ghost)?.views?.some(view => view.id === viewId && view.scope !== 'task');
   return !ghost || !isGlobalTabCapableGhost(ghost);
@@ -160,6 +166,8 @@ export function buildTabAvailabilities(input: TabAvailabilityInput): TabAvailabi
         input.remoteHostId || input.deviceLinkDeviceId !== null ? [] : input.installedGhosts,
       // 另一台电脑上的任务只保留声明了 taskView.remote 的任务页（它在本机显示那台
       // 电脑上同一插件的设备画面）；SSH 远程任务没有任务页。
+      pluginViewGhosts: input.installedGhosts,
+      workspaceWebScope: input.remoteHostId || input.deviceLinkDeviceId ? 'remote' : 'local',
       pluginTaskGhosts: input.remoteHostId
         ? []
         : input.deviceLinkDeviceId
@@ -174,6 +182,7 @@ export function buildTabAvailabilities(input: TabAvailabilityInput): TabAvailabi
       subagentsAvailable: true,
       hiddenTabIds: input.hiddenTabIds,
       pluginViewGhosts: input.installedGhosts,
+      workspaceWebScope: 'global',
     },
   };
 }

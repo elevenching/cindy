@@ -489,9 +489,13 @@ function legacyPanelEdge(instanceId: string): TabGroupId | null {
 export function reconcileGlobalPluginTabs(ghosts: readonly InstalledGhost[]): void {
   const current = freshSnapshot();
   const installed = new Map(ghosts.map((ghost) => [installedGhostStoragePart(ghost), ghost]));
-  let tabs = current.tabs.filter((tab) =>
-    installed.has((tab.state as PluginViewTabState).instanceId),
-  );
+  let tabs = current.tabs.filter((tab) => {
+    const state = tab.state as PluginViewTabState;
+    const ghost = installed.get(state.instanceId);
+    // Old Buildr views have no conversation owner and cannot be restored into one.
+    return ghost && (ghost.manifest.id !== 'buildr-workspace' || state.resourceViewId || !ghost.manifest.mainView?.workspaceWeb ||
+      effectivePluginView(state, ghost) !== 'main');
+  });
   let dismissed = current.dismissedInstanceIds.filter((id) => installed.has(id));
   let placed = current.placedInstanceIds.filter((id) => installed.has(id));
   const windowed = current.windowInstanceIds.filter((id) => installed.has(id));
