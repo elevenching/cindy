@@ -4409,6 +4409,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       openerTabId?: string;
       openerSessionId?: string;
       nativePopupSurfaceId?: string;
+      workspaceLink?: true;
     }) => void,
   ): (() => void) =>
     fanOutRsbBrowserPopup((payload) => {
@@ -4421,12 +4422,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         openerTabId?: unknown;
         openerSessionId?: unknown;
         nativePopupSurfaceId?: unknown;
+        workspaceLink?: unknown;
       };
       if (typeof p.url !== 'string' || typeof p.disposition !== 'string') return;
       if (p.openerTabId !== undefined && typeof p.openerTabId !== 'string') return;
       if (p.openerSessionId !== undefined && typeof p.openerSessionId !== 'string') return;
       if (p.nativePopupSurfaceId !== undefined && typeof p.nativePopupSurfaceId !== 'string')
         return;
+      if (p.workspaceLink !== undefined && p.workspaceLink !== true) return;
       callback(
         p as {
           url: string;
@@ -4434,6 +4437,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
           openerTabId?: string;
           openerSessionId?: string;
           nativePopupSurfaceId?: string;
+          workspaceLink?: true;
         },
       );
     }),

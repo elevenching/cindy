@@ -2542,6 +2542,11 @@ const config: ForgeConfig = {
           target: 'preload',
         },
         {
+          entry: 'src/preload/workspaceWebPreload.ts',
+          config: 'vite.ghost-preload.config.ts',
+          target: 'preload',
+        },
+        {
           entry: 'src/preload/ghostPagePreload.ts',
           config: 'vite.ghost-preload.config.ts',
           target: 'preload',

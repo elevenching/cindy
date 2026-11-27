@@ -127,6 +127,7 @@ interface RsbBrowserPopupPayloadStub {
   openerTabId?: string;
   openerSessionId?: string;
   nativePopupSurfaceId?: string;
+  workspaceLink?: true;
 }
 
 let rsbBrowserPopupListeners: Array<(payload: RsbBrowserPopupPayloadStub) => void> = [];
@@ -2037,6 +2038,32 @@ describe('RightSidebarShell 跨 session popup 归属', () => {
     // popup 是 guest 页面脚本催生的,不是用户手势:detached 形态下不得 show+focus
     // 抢走用户前台(与 agent tab-op open 路径一致)。
     expect(requests[0].opts.userInitiated).toBe(false);
+  });
+
+  // Unit: workspace links reuse the popup route but activate the new tab as a
+  // user action. The native popup tests cover background routing separately.
+  it('opens a clicked workspace website in the foreground browser tab', async () => {
+    renderShell();
+    await waitFor(() => expect(rsbBrowserPopupListeners).toHaveLength(1));
+    await act(async () => {
+      rsbBrowserPopupListeners[0]({
+        url: 'https://example.com/site',
+        disposition: 'foreground-tab',
+        workspaceLink: true,
+      });
+    });
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    const bucket = getBucket('s1');
+    expect(bucket.tabs).toEqual([expect.objectContaining({
+      kind: 'web-browser',
+      state: expect.objectContaining({ url: 'https://example.com/site' }),
+    })]);
+    expect(bucket.activeTabId).toBe(bucket.tabs[0].id);
+    expect(requests[0]).toEqual({
+      visibility: 'open',
+      opts: expect.objectContaining({ sessionId: 's1', userInitiated: true }),
+    });
   });
 
   it('native popup claim 原始 WebContents,不再 eagerSpawn 新 webview,并响应 window.close', async () => {

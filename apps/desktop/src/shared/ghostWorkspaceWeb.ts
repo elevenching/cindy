@@ -35,3 +35,18 @@ export function resolveGhostWorkspaceWebPage(origin: string, value: unknown): Gh
   if (!isGhostWorkspaceWebUrl(origin, url)) return null;
   return { workspaceId, url };
 }
+
+export const WORKSPACE_WEB_OPEN_LINK = 'workspace-web:open-link';
+
+/** Browser navigation for an ordinary site, with no credentials in the URL. */
+export function parseWorkspaceWebLink(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 4096) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname ||
+        url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}

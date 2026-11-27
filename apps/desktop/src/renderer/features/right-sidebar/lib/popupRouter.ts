@@ -20,6 +20,7 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import { requestRevealSessionTab } from '../globalTabs';
 
 import { addTab, closeTab, ensureHydrated, getBucket } from '../store';
 import { eagerSpawnAndReport } from './rsbBrowserBridge';
@@ -60,7 +61,7 @@ export function initPopupRouter(): () => void {
   }
   initialized = true;
 
-  const offPopup = api.onRsbBrowserPopup(({ url, openerSessionId, nativePopupSurfaceId }) => {
+  const offPopup = api.onRsbBrowserPopup(({ url, openerSessionId, nativePopupSurfaceId, workspaceLink }) => {
     const targetSessionId = openerSessionId ?? fallbackSessionId;
     if (!targetSessionId) {
       // 既无 opener 归属也无任何已知 session(冷启动即触发)——丢弃优于瞎猜。
@@ -92,7 +93,7 @@ export function initPopupRouter(): () => void {
       // callback 页,快速 window.close 会赶在登记前到达且 close 事件不重发。
       const newTab = await addTab(targetSessionId, 'web-browser', initialState, {
         onOptimisticAdd: (tabId) => {
-          markPopupSpawnedTab(tabId);
+          if (!workspaceLink) markPopupSpawnedTab(tabId);
           if (nativePopupSurfaceId) {
             registerNativePopupTab(tabId, targetSessionId, nativePopupSurfaceId);
           }
@@ -102,6 +103,7 @@ export function initPopupRouter(): () => void {
       // 乐观移除 + ipc.close 落库后,tab 已不在 bucket 里。若此时仍 eagerSpawn,
       // 会在 pool/Main registry 里留下孤立入口并重新加载 OAuth URL(Codex P1)。
       if (!getBucket(targetSessionId).tabs.some((t) => t.id === newTab.id)) return;
+      if (workspaceLink) requestRevealSessionTab(targetSessionId, newTab.id);
       if (nativePopupSurfaceId) {
         // Claim immediately so main can register the exact popup WebContents,
         // deliver self-close, and pin both popup + ordinary webview opener.
@@ -136,7 +138,7 @@ export function initPopupRouter(): () => void {
       // 当次手势;detached 形态下不得 show+focus 抢走用户前台。
       requestRightSidebarVisibility('open', {
         sessionId: targetSessionId,
-        userInitiated: false,
+        userInitiated: workspaceLink === true,
       });
     })().catch((err) => {
       log.error('rsb popup → addTab failed', { sessionId: targetSessionId, url, err });

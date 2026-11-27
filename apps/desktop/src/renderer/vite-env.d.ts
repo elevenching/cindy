@@ -3277,6 +3277,7 @@ interface ElectronAPI {
       openerTabId?: string;
       openerSessionId?: string;
       nativePopupSurfaceId?: string;
+      workspaceLink?: true;
     }) => void,
   ) => () => void;
 

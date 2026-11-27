@@ -749,6 +749,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onStatusChange: (cb: (payload: unknown) => void) => onPayload(MODEL_ACCESS_STATUS_CHANNEL, cb),
   },
   /** 主窗推送 RSB 浏览器按键命令（⌘L / ⌘W 等）—— main 端常量见 webview-security RSB_BROWSER_COMMAND_CHANNEL。 */
+  onRsbBrowserPopup: (
+    cb: (payload: { url: string; disposition: string; workspaceLink: true }) => void,
+  ): (() => void) => onPayload('rsb:browser-popup', (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const value = payload as { workspaceLink?: unknown; url?: unknown; disposition?: unknown };
+    if (value.workspaceLink !== true || typeof value.url !== 'string' || typeof value.disposition !== 'string') return;
+    cb({ url: value.url, disposition: value.disposition, workspaceLink: true });
+  }),
+
   onRsbBrowserCommand: (
     cb: (payload: { command: string }) => void,
   ): (() => void) => onPayload('rsb:browser-command', cb),

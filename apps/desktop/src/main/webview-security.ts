@@ -53,6 +53,8 @@ import {
 } from './cindy-brain/index.js';
 import {
   GHOST_WORKSPACE_WEB_PARTITION,
+  WORKSPACE_WEB_OPEN_LINK,
+  parseWorkspaceWebLink,
   isGhostWorkspaceWebUrl,
 } from '../shared/ghostWorkspaceWeb.js';
 import { isTrustedAppRendererWindow } from './security/trustedAppRenderer.js';
@@ -478,6 +480,7 @@ export interface RsbBrowserPopupPayload {
   openerSessionId?: string;
   /** Main-owned WebContentsView surface that preserves the popup browsing context. */
   nativePopupSurfaceId?: string;
+  workspaceLink?: true;
 }
 
 /**
@@ -1031,6 +1034,7 @@ export function installWebviewHardener(): void {
         webPreferences.partition = view.partition;
         applyGhostWebviewHardening(webPreferences as unknown as Record<string, unknown>, params);
         delete params.preload;
+        webPreferences.preload = path.join(__dirname, 'workspaceWebPreload.js');
         delete webPreferences.enableBlinkFeatures;
         webPreferences.experimentalFeatures = false;
         webPreferences.navigateOnDragDrop = false;
@@ -1110,6 +1114,14 @@ export function installWebviewHardener(): void {
           return;
         }
         guestContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        guestContents.ipc.on(WORKSPACE_WEB_OPEN_LINK, (event, candidate: unknown) => {
+          const frame = event.senderFrame;
+          if (event.sender !== guestContents || !frame || frame !== guestContents.mainFrame || !view.current() ||
+              !isGhostWorkspaceWebUrl(view.origin, frame.url) ||
+              !isTrustedAppRendererWindow(BrowserWindow.fromWebContents(contents))) return;
+          const url = parseWorkspaceWebLink(candidate);
+          if (url) sendBrowserPopup(contents, { url, disposition: 'foreground-tab', workspaceLink: true });
+        });
         const guard = (event: Electron.Event, url: string) => {
           if (!isGhostWorkspaceWebUrl(view.origin, url) || !view.current()) event.preventDefault();
         };
