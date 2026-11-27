@@ -32,6 +32,20 @@ export function makeProjectDraftRightSidebarSessionId(workdir: string): string {
   return `${LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX}${workdir}`;
 }
 
+/** Keep the sidebar visibility across project changes within the new conversation. */
+export function collapsedForDraftProjectChange(
+  previousSessionId: string | null,
+  sessionId: string,
+  currentCollapsed: boolean,
+): boolean | undefined {
+  if (!sessionId.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX) || sessionId === previousSessionId) {
+    return undefined;
+  }
+  return previousSessionId?.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX)
+    ? currentCollapsed
+    : true;
+}
+
 /**
  * RSB bucket sessionId → 该 bucket 可见 composer 的 composerDraftStore 键。
  *

@@ -354,17 +354,29 @@ function withCapturedCss(build: () => string, colorScheme: string): string {
 it('projects only semantic colors for the current workspace surface', () => {
   const root = document.documentElement;
   const savedStyle = root.getAttribute('style');
-  vi.stubGlobal('CSS', { supports: (_property: string, value: string) => /^#[0-9a-f]{6}$/i.test(value) });
+  vi.stubGlobal('CSS', {
+    supports: (_property: string, value: string) => /^(#[0-9a-f]{6}|hsl\(\d+ \d+% \d+%\))$/i.test(value),
+  });
   try {
     root.style.setProperty('--content-area', '#fafafa');
     root.style.setProperty('--panel-bg', '#ececec');
     root.style.setProperty('--text-primary', '#202020');
+    root.style.setProperty('--sidebar', '210 15% 13%');
+    root.style.setProperty('--sidebar-item-active', '164 22% 22%');
+    root.style.setProperty('--sidebar-item-active-foreground', '#a2d9ca');
+    root.style.setProperty('--accent-cta-bg-pure', '#83c8b8');
+    root.style.setProperty('--accent-pure-cta-fg', '#172722');
     root.style.setProperty('--border-default', '#ffffff; background:red');
     root.style.colorScheme = 'dark';
     expect(buildGhostWorkspaceThemeCss(false)).toContain('--cindy-workspace-canvas: #fafafa');
     const sidebar = buildGhostWorkspaceThemeCss(true);
     expect(sidebar).toContain('--cindy-workspace-canvas: #ececec');
     expect(sidebar).toContain('--cindy-workspace-text: #202020');
+    expect(sidebar).toContain('--cindy-workspace-sidebar: hsl(210 15% 13%)');
+    expect(sidebar).toContain('--cindy-workspace-selected: hsl(164 22% 22%)');
+    expect(sidebar).toContain('--cindy-workspace-selected-text: #a2d9ca');
+    expect(sidebar).toContain('--cindy-workspace-accent: #83c8b8');
+    expect(sidebar).toContain('--cindy-workspace-accent-text: #172722');
     expect(sidebar).toContain('color-scheme: dark');
     expect(sidebar).not.toContain('background:red');
   } finally {

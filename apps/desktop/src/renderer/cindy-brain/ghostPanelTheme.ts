@@ -213,15 +213,23 @@ export function buildGhostWorkspaceThemeCss(sidebar: boolean): string {
   const tokens = {
     canvas: sidebar ? '--panel-bg' : '--content-area',
     surface: '--surface-elevated',
-    sidebar: '--panel-bg',
+    sidebar: '--sidebar',
     text: '--text-primary',
     muted: '--text-secondary',
     border: '--border-default',
+    hover: '--surface-hover',
+    selected: '--sidebar-item-active',
+    'selected-text': '--sidebar-item-active-foreground',
+    accent: '--accent-cta-bg-pure',
+    'accent-hover': '--accent-hover',
+    'accent-text': '--accent-pure-cta-fg',
   };
   const colors = Object.entries(tokens).flatMap(([role, token]) => {
-    const value = style.getPropertyValue(token).trim();
-    return value && isSafeGhostThemeValue(value) && CSS.supports('color', value)
-      ? [`--cindy-workspace-${role}: ${value};`] : [];
+    const raw = style.getPropertyValue(token).trim();
+    if (!raw || !isSafeGhostThemeValue(raw)) return [];
+    // Sidebar backgrounds use HSL channels in the host theme.
+    const value = role === 'sidebar' || role === 'selected' ? `hsl(${raw})` : raw;
+    return CSS.supports('color', value) ? [`--cindy-workspace-${role}: ${value};`] : [];
   });
   return `:root { color-scheme: ${readHostColorScheme()}; ${colors.join(' ')} }`;
 }

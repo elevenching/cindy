@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DRAFT_RIGHT_SIDEBAR_TOGGLE_DRAG_STYLE,
   composerDraftKeyForRightSidebarSession,
+  collapsedForDraftProjectChange,
   makeProjectDraftRightSidebarSessionId,
   resolveNewMakerDraftRightSidebar,
 } from '@/features/cc-agent/newMakerDraftRightSidebar';
@@ -29,6 +30,20 @@ describe('New Maker draft right sidebar', () => {
     expect(makeProjectDraftRightSidebarSessionId('/repo/a')).not.toBe(
       makeProjectDraftRightSidebarSessionId('/repo/b'),
     );
+  });
+
+  // Unit: a draft can revisit a project whose sidebar was previously open.
+  // Changing its tab bucket must preserve the current draft's visibility.
+  it('starts collapsed and preserves visibility while switching local projects', () => {
+    const projectA = makeProjectDraftRightSidebarSessionId('/repo/a');
+    const projectB = makeProjectDraftRightSidebarSessionId('/repo/b');
+
+    expect(collapsedForDraftProjectChange(null, projectA, false)).toBe(true);
+    expect(collapsedForDraftProjectChange('real-session', projectA, false)).toBe(true);
+    expect(collapsedForDraftProjectChange(projectA, projectB, true)).toBe(true);
+    expect(collapsedForDraftProjectChange(projectB, projectA, false)).toBe(false);
+    expect(collapsedForDraftProjectChange(projectA, projectA, false)).toBeUndefined();
+    expect(collapsedForDraftProjectChange(projectA, 'real-session', false)).toBeUndefined();
   });
 
   it('does not expose the full sidebar for dialogue or remote drafts', () => {

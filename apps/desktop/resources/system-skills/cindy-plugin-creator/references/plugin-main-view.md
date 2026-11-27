@@ -70,5 +70,7 @@ Host 调用 Node JSON-RPC 方法 `workspaceWeb.resolve` 并传 `{workdir: string
 
 工作空间网页可通过 CSS 变量读取当前 Cindy 主题。Host 在文档加载和主题切换时更新
 `--cindy-workspace-canvas`、`--cindy-workspace-surface`、`--cindy-workspace-sidebar`、
-`--cindy-workspace-text`、`--cindy-workspace-muted`、`--cindy-workspace-border` 与
+`--cindy-workspace-text`、`--cindy-workspace-muted`、`--cindy-workspace-border`、
+`--cindy-workspace-hover`、`--cindy-workspace-selected`、`--cindy-workspace-selected-text`、
+`--cindy-workspace-accent`、`--cindy-workspace-accent-hover`、`--cindy-workspace-accent-text` 与
 `color-scheme`。网页自行将这些颜色绑定到样式，独立浏览器访问可用 CSS fallback。
