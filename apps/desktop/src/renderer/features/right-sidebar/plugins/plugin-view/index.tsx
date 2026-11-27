@@ -1,3 +1,6 @@
+import { GhostWorkspaceWebBody } from '@/cindy-brain/GhostWorkspaceWebBody';
+import { approvedGhostWorkspaceWebOrigin } from '../../../../../shared/ghostWorkspaceWeb';
+import { ghostInstallApprovalToken } from '../../../../../shared/ghost';
 import { pluginSourceTooltip } from '@cindy/maker-shared/mcp-apps';
 /**
  * plugin-view —— 右侧栏里承载插件页面的页签(全局页签,不跟对话)。
@@ -60,12 +63,23 @@ function PluginViewTabPillIcon({ state }: { state: PluginViewTabState }) {
   return <Icon size={13} />;
 }
 
-function PluginViewBody({ state }: TabKindBodyProps<PluginViewTabState>) {
+function PluginViewBody({ state, ctx, active, shellVisible }: TabKindBodyProps<PluginViewTabState>) {
   const ghost = useInstalledGhostByInstance(state.instanceId);
   const runtimeState = useGhostRuntimeState(state.instanceId);
   // 停用 / 卸载的瞬间投影层已把页签隐藏,这里只兜住收起前的一两帧。
   if (!ghost || ghost.enabled === false) return null;
   if (state.resourceViewId) return <PluginUiView chrome="panel" sizing="fill" ghost={ghost} viewId={state.resourceViewId} sessionId={null} input={state.resourceInput} />;
+  if (effectivePluginView(state, ghost) === 'main' && approvedGhostWorkspaceWebOrigin(ghost)) {
+    const localSessionId = !ctx.remoteHostId && ctx.deviceLinkDeviceId === null ? ctx.sessionId || null : null;
+    return <GhostWorkspaceWebBody
+      key={ghostInstallApprovalToken(ghost.approval) ?? state.instanceId}
+      instanceId={state.instanceId}
+      sessionId={localSessionId}
+      directoryKey={ctx.workdir}
+      mode="sidebar"
+      visible={active !== false && shellVisible !== false}
+    />;
+  }
   if (runtimeState === 'crashed' || runtimeState === 'fused') {
     return <GhostPanelError ghost={ghost} state={runtimeState} />;
   }

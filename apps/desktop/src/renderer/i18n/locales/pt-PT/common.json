@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "Não foi possível abrir a aplicação local. Verifique se está em execução e tente novamente.",
+    "noWorkspace": "Não há nenhum espaço de trabalho associado a esta conversa.",
+    "retry": "Tentar novamente"
+  },
   "runtimePlugins": {
     "save": "Guardar",
     "promptUnsupported": "Este local de execução do Pi não suporta fragmentos de instruções de sistema.",

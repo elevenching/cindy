@@ -1,3 +1,4 @@
+import { approvedGhostWorkspaceWebOrigin, isGhostWorkspaceWebUrl, resolveGhostWorkspaceWebPage } from '../../shared/ghostWorkspaceWeb.js';
 import { assertConfirmedGhostUninstallOwner, readConfirmedGhostUninstall } from './confirmedGhostUninstall.js';
 import type { ConfirmedGhostUninstall } from '../../shared/ghost.js';
 import { readGithubAppToken } from '../git-context/githubAppAuthorization.desktop.js';
@@ -10811,6 +10812,36 @@ export function registerGhostIpc(): void {
   ipcMain.on('ghosts:list', (event) => {
     event.returnValue = displayList();
   });
+  ipcMain.handle('ghosts:workspace-web:resolve', async (event, instanceId: unknown, sessionId: unknown) => {
+    if (!isTrustedAppRendererEvent(event) || getDeviceLinkInvokeContext()) {
+      throwIpcError('PERMISSION_DENIED', 'Workspace web pages are only available on the desktop');
+    }
+    if (typeof instanceId !== 'string' || !isPluginInstanceKey(instanceId) ||
+        (sessionId !== null && (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 128))) {
+      throwIpcError('INVALID_REQUEST', 'Invalid workspace web page request');
+    }
+    const initial = findGhostForInstanceId(instanceId);
+    const origin = approvedGhostWorkspaceWebOrigin(initial);
+    if (!initial || !origin) throwIpcError('PERMISSION_DENIED', 'Workspace web page is unavailable');
+    const approval = ghostInstallApprovalToken(initial.approval);
+    const scope = captureDataOwnerBroadcastScope();
+    const current = () => {
+      const ghost = findGhostForInstanceId(instanceId);
+      return !!ghost && isDataOwnerBroadcastScopeCurrent(scope) &&
+        approvedGhostWorkspaceWebOrigin(ghost) === origin && ghostInstallApprovalToken(ghost.approval) === approval;
+    };
+    const row = typeof sessionId === 'string' ? await getSessionFsSnapshot(sessionId) : null;
+    if (!current()) return null;
+    const workdir = row && !row.remoteHostId && row.workingDir &&
+      !isGhostDisabledForWorkdir(instanceId, row.workingDir) ? row.workingDir : null;
+    const result = await getGhostNodeRuntimeBroker().handleRequest(instanceId, {
+      type: 'node-request',
+      method: 'workspaceWeb.resolve',
+      params: { workdir },
+      timeoutMs: 10000,
+    });
+    return current() && result.ok ? resolveGhostWorkspaceWebPage(origin, result.result) : null;
+  });
   ipcMain.handle(GHOST_COMPOSER_LIST_CHANNEL, createGhostComposerListHandler({
     list: availableGhosts,
     disabledIds: listDisabledGhostIdsForWorkdir,
@@ -12236,6 +12267,16 @@ export function resolveGhostWebviewAttach(
     partition,
     owner: { mode: owner.mode, dataOwnerId: owner.dataOwnerId! },
   };
+}
+
+/** The external guest has its own partition and does not receive the plugin protocol. */
+export function resolveGhostWorkspaceWebAttach(instanceId: string, src: unknown) {
+  if (!isPluginInstanceKey(instanceId)) return null;
+  const ghost = findGhostForInstanceId(instanceId);
+  const origin = approvedGhostWorkspaceWebOrigin(ghost);
+  if (!ghost || !origin || !isGhostWorkspaceWebUrl(origin, src)) return null;
+  const partition = ownerScopedGhostPartitionForInstalledGhost(ghost, getActiveAppSession());
+  return partition ? { origin, partition: `${partition}:workspace-web:${new URL(origin).port}` } : null;
 }
 
 /** Local and remote project controls share persistence and scoped policy invalidation. */

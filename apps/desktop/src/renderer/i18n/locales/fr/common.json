@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "Impossible d’ouvrir l’application locale. Vérifiez qu’elle est en cours d’exécution, puis réessayez.",
+    "noWorkspace": "Aucun espace de travail n’est associé à cette conversation.",
+    "retry": "Réessayer"
+  },
   "runtimePlugins": {
     "save": "Enregistrer",
     "promptUnsupported": "Cet emplacement d’exécution de Pi ne prend pas en charge les fragments d’instructions système.",

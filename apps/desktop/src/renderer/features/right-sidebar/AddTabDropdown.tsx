@@ -85,7 +85,7 @@ export function AddTabDropdown({
       disabled={item.disabled}
       onSelect={() => {
         onClose();
-        if (item.group === 'plugins') menu.select(item.kind, { groupId, onGlobalTabSelected });
+        if (item.group) menu.select(item.kind, { groupId, onGlobalTabSelected });
         else menu.select(item.kind);
       }}
     />

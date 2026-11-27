@@ -13,7 +13,7 @@
 
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
@@ -23,6 +23,7 @@ vi.mock('react-i18next', () => ({
 import type { GhostManifest, InstalledGhost } from '../../../shared/ghost';
 import { installedGhostStoragePart } from '../../../shared/pluginIdentity';
 import { GhostWebviewBody } from '../ghostPanelBody';
+import { GhostWorkspaceWebBody } from '../GhostWorkspaceWebBody';
 
 const ghost = {
   manifest: { schemaVersion: 2, id: 'canvas', name: 'canvas', version: '1.0.0', kind: 'chip', entry: 'main.js' } as GhostManifest,
@@ -99,4 +100,41 @@ describe('GhostWebviewBody 创建 / 销毁日志', () => {
     expect(raw).not.toContain('session=');
     expect(raw).not.toContain('.html');
   });
+});
+
+// Unit, workspace-plugin-page: ordinary plugin views test mounting, but do not
+// cover restoring a navigated work area after switching conversation scopes.
+it('keeps the same guest when returning after navigating within a workspace page', async () => {
+  const origin = 'http://127.0.0.1:4458';
+  const first = { workspaceId: 'a', url: origin + '/workspaces/a/overview' };
+  const second = { workspaceId: 'b', url: origin + '/workspaces/b/overview' };
+  const resolveWorkspaceWeb = vi.fn(async (_id: string, session: string | null) =>
+    session === 'b' ? second : first);
+  vi.stubGlobal('electronAPI', { ghosts: { resolveWorkspaceWeb } });
+  const body = (sessionId: string, directoryKey: string) =>
+    <GhostWorkspaceWebBody instanceId="buildr" sessionId={sessionId} directoryKey={directoryKey} mode="sidebar" />;
+  const { container, rerender } = render(body('a', '/a'));
+  const visibleGuest = () => container.querySelector('webview:not([hidden] webview)');
+  await waitFor(() => expect(visibleGuest()?.getAttribute('src')).toBe(first.url));
+  const navigatedGuest = visibleGuest()!;
+  // A webview can navigate inside Buildr independently of the initial URL.
+  const manualPath = origin + '/workspaces/c/projects';
+  navigatedGuest.setAttribute('src', manualPath);
+  rerender(body('a-worktree', '/a-worktree'));
+  await waitFor(() => expect(visibleGuest()).toBe(navigatedGuest));
+  rerender(body('b', '/b'));
+  await waitFor(() => expect(visibleGuest()?.getAttribute('src')).toBe(second.url));
+  rerender(body('a', '/a'));
+  expect(visibleGuest()).toBe(navigatedGuest);
+  expect(visibleGuest()?.getAttribute('src')).toBe(manualPath);
+  expect(resolveWorkspaceWeb).toHaveBeenCalledTimes(3);
+});
+
+it('loads the installed app home in the full page when no conversation is open', async () => {
+  const home = 'http://127.0.0.1:4458/?catalog=1';
+  const resolveWorkspaceWeb = vi.fn(async () => ({ workspaceId: null, url: home }));
+  vi.stubGlobal('electronAPI', { ghosts: { resolveWorkspaceWeb } });
+  const { container } = render(<GhostWorkspaceWebBody instanceId="buildr" sessionId={null} mode="main" />);
+  await waitFor(() => expect(container.querySelector('webview')?.getAttribute('src')).toBe(home));
+  expect(resolveWorkspaceWeb).toHaveBeenCalledWith('buildr', null);
 });

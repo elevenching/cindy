@@ -1407,6 +1407,7 @@ interface ElectronAPI {
   },
 
   ghosts: {
+    resolveWorkspaceWeb: (instanceId: string, sessionId: string | null) => Promise<import('../shared/ghostWorkspaceWeb').GhostWorkspaceWebPage | null>;
     activateBrowser: (id: string) => Promise<{ ok: boolean }>;
     mailPreview: (sessionId: string, url: string, read: boolean, opened?: boolean, providerId?: string) => Promise<import('@cindy/maker-shared/mail-message').MailPreviewResult>;
     openRemoteSettings: (target: import('../shared/remotePluginSettings').RemotePluginSettingsTarget) => Promise<import('../shared/remotePluginSettings').RemotePluginSettingsView>;

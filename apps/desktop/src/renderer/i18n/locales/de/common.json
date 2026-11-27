@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "Die lokale App konnte nicht geöffnet werden. Prüfe, ob sie läuft, und versuche es erneut.",
+    "noWorkspace": "Mit dieser Unterhaltung ist kein Arbeitsbereich verknüpft.",
+    "retry": "Erneut versuchen"
+  },
   "runtimePlugins": {
     "save": "Speichern",
     "promptUnsupported": "Dieser Pi-Ausführungsort unterstützt keine Systemanweisungsfragmente.",

@@ -252,3 +252,28 @@ it.each(['menu', 'empty'])('opens plugins in the selected group and reports exis
   fireEvent.click(within(screen.getByTestId(surface)).getByText('Alpha'));
   expect(onGlobalTabSelected).toHaveBeenLastCalledWith('g_alpha', true);
 });
+
+// Unit, workspace-plugin-page. Ordinary plugin tests do not cover a workspace
+// web app appearing ahead of built-ins on both entry surfaces.
+it('puts an approved workspace web app first and opens the same global tab from either surface', () => {
+  m.ghosts = [{
+    enabled: true,
+    approval: { state: 'approved' },
+    manifest: {
+      id: 'buildr', name: 'Buildr', sessionContext: true, node: { entry: 'worker.cjs' },
+      preview: { hosts: ['127.0.0.1'] },
+      mainView: { title: 'Buildr', html: 'compat.html', workspaceWeb: 'http://127.0.0.1:4458' },
+    },
+  }];
+  const onGlobalTabSelected = vi.fn();
+  render(<Entries sessionId="task-1" onSelect={vi.fn()} onGlobalTabSelected={onGlobalTabSelected} both />);
+  const menu = within(screen.getByTestId('menu'));
+  const empty = within(screen.getByTestId('empty'));
+  for (const scope of [menu, empty]) {
+    const buildr = scope.getByRole('button', { name: /^Buildr/ });
+    expect(scope.getAllByRole('button')[0]).toBe(buildr);
+    fireEvent.click(buildr);
+  }
+  expect(onGlobalTabSelected.mock.calls[0]?.[1]).toBe(false);
+  expect(onGlobalTabSelected.mock.calls[1]).toEqual([onGlobalTabSelected.mock.calls[0]?.[0], true]);
+});

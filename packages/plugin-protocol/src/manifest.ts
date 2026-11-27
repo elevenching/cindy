@@ -187,7 +187,22 @@ export type GhostMainViewOpenMode = (typeof GHOST_MAIN_VIEW_OPEN_MODES)[number];
 export const GHOST_TAB_SIDES = ['left', 'right', 'top', 'bottom'] as const;
 export type GhostTabSide = (typeof GHOST_TAB_SIDES)[number];
 
+/** Workspace web apps use a single explicitly declared IPv4 loopback origin. */
+export function isGhostWorkspaceWebOrigin(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(value);
+  return match !== null && Number(match[1]) <= 65535 && Number(match[1]) !== 80;
+}
+
+export function hasGhostWorkspaceWebPrerequisites(value: object): boolean {
+  const manifest = value as { node?: unknown; sessionContext?: unknown; preview?: { hosts?: unknown } };
+  return Boolean(manifest.node) && manifest.sessionContext === true &&
+    Array.isArray(manifest.preview?.hosts) && manifest.preview.hosts.includes('127.0.0.1');
+}
+
 export interface GhostMainViewDecl {
+  /** Approved local service used for the main page and workspace sidebar. */
+  workspaceWeb?: string;
   /** 侧边栏与主视图标题；缺省回退插件 name。 */
   title?: string;
   /** 侧边栏使用的 Cindy 系统线性图标；缺省为 puzzle。 */
@@ -1846,8 +1861,18 @@ function validateGhostManifestInput(value: unknown, preserveHistoricalParameterS
         return { ok: false, reason: `mainView.side 必须是 ${GHOST_TAB_SIDES.join(' / ')}` };
       }
     }
+    const workspaceWeb = raw.mainView.workspaceWeb;
+    if (workspaceWeb !== undefined && !(
+      isGhostWorkspaceWebOrigin(workspaceWeb) &&
+      hasGhostWorkspaceWebPrerequisites(raw) &&
+      raw.mainView.multiple === true &&
+      (raw.mainView.open === undefined || raw.mainView.open === 'page')
+    )) {
+      return { ok: false, reason: 'mainView.workspaceWeb 需要明确的 127.0.0.1 回环端口、node、sessionContext、preview.hosts 和可同时打开的整页主视图' };
+    }
     mainView = {
-      ...unknownDeclarationFields(raw.mainView, ['html', 'title', 'icon', 'preferredIcon', 'open', 'side', 'multiple']),
+      ...unknownDeclarationFields(raw.mainView, ['html', 'title', 'icon', 'preferredIcon', 'open', 'side', 'multiple', 'workspaceWeb']),
+      ...(typeof workspaceWeb === 'string' ? { workspaceWeb } : {}),
       ...(typeof raw.mainView.preferredIcon === 'string' ? { preferredIcon: raw.mainView.preferredIcon } : {}),
       ...(raw.mainView.title !== undefined ? { title: raw.mainView.title } : {}),
       ...(raw.mainView.icon !== undefined ? { icon: raw.mainView.icon as GhostMainViewIcon } : {}),

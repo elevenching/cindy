@@ -1535,6 +1535,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   ghosts: {
+    resolveWorkspaceWeb: (instanceId: string, sessionId: string | null): Promise<import('../shared/ghostWorkspaceWeb').GhostWorkspaceWebPage | null> =>
+      ipcRenderer.invoke('ghosts:workspace-web:resolve', instanceId, sessionId),
     activateBrowser: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('ghosts:activate-browser', id),
     mailPreview: (sessionId: string, url: string, read: boolean, opened = false, providerId?: string) => ipcRenderer.invoke('ghosts:mail-preview', sessionId, url, read, opened, providerId),
     openRemoteSettings: (target: import('../shared/remotePluginSettings').RemotePluginSettingsTarget): Promise<import('../shared/remotePluginSettings').RemotePluginSettingsView> =>

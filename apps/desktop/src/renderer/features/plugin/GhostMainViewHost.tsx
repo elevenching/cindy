@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
+import { GhostWorkspaceWebBody } from '@/cindy-brain/GhostWorkspaceWebBody';
+import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
+import { ghostInstallApprovalToken } from '../../../shared/ghost';
 import { useGhostMainViews } from '@/cindy-brain/ghostMainViews';
 import { GhostPanelError, GhostWebviewBody } from '@/cindy-brain/ghostPanelBody';
 import { useGhostRuntimeState } from '@/cindy-brain/runtimeStates';
@@ -17,6 +20,7 @@ import { installedGhostStoragePart } from '../../../shared/pluginIdentity';
 export function GhostMainViewHost() {
   const { ghostId = '' } = useParams<{ ghostId: string }>();
   const navigate = useNavigate();
+  const { state } = useLocation();
   const { routeCapable } = useGhostMainViews();
   const item = routeCapable.find((candidate) => candidate.instanceId === ghostId);
   const runtimeState = useGhostRuntimeState(
@@ -51,7 +55,14 @@ export function GhostMainViewHost() {
           style={{ height: CONTENT_HEADER_HEIGHT_PX, ...WINDOW_DRAG_STYLE }}
         />
       )}
-      {broken ? (
+      {approvedGhostWorkspaceWebOrigin(installedGhost) ? (
+        <GhostWorkspaceWebBody
+          key={ghostInstallApprovalToken(installedGhost.approval) ?? item.instanceId}
+          instanceId={item.instanceId}
+          sessionId={typeof state?.workspaceWebSessionId === 'string' ? state.workspaceWebSessionId : null}
+          mode="main"
+        />
+      ) : broken ? (
         <GhostPanelError ghost={installedGhost} state={runtimeState} />
       ) : (
         <GhostWebviewBody key={installedGhostStoragePart(installedGhost)} ghost={installedGhost} html={manifest.mainView?.html} wallpaperCanvas />

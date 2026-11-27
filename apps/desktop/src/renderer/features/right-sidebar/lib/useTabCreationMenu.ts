@@ -1,3 +1,4 @@
+import { approvedGhostWorkspaceWebOrigin } from '../../../../shared/ghostWorkspaceWeb';
 import { useContext, useRef, useState, useSyncExternalStore } from 'react';
 import { MAIN_VIEW_ICONS, mainViewIconName } from '@/cindy-brain/mainViewIcons';
 import { useInstalledGhosts } from '@/cindy-brain/useInstalledGhosts';
@@ -31,7 +32,7 @@ export interface TabCreationSelectionOptions {
 
 export interface TabCreationMenu {
   items: Array<TabKindMenuMeta & {
-    disabled: boolean; busy: boolean; group?: 'plugins'; alreadyOpen?: boolean;
+    disabled: boolean; busy: boolean; group?: 'plugins' | 'workspace'; alreadyOpen?: boolean;
   }>;
   select: (kind: TabKindId, options?: TabCreationSelectionOptions) => void;
 }
@@ -57,6 +58,7 @@ export function useTabCreationMenu({
       kind: `ghost:${instanceId}` as TabKindId,
       instanceId,
       ghost,
+      workspace: !!approvedGhostWorkspaceWebOrigin(ghost),
       title: globalTabTitleForGhost(ghost),
       icon: MAIN_VIEW_ICONS[mainViewIconName(ghost.manifest.mainView)],
       open: globalTabs.some(tab => (tab.state as PluginViewTabState | null)?.instanceId === instanceId),
@@ -96,6 +98,7 @@ export function useTabCreationMenu({
       const tab = addGlobalPluginTab(plugin.instanceId, {
         ...(options?.groupId && options.groupId !== 'right' ? { groupId: options.groupId } : {}),
         ghost: plugin.ghost,
+        ...(plugin.workspace ? { view: 'main' as const } : {}),
       });
       if (tab) {
         options?.onGlobalTabSelected?.(tab.id, plugin.open);
@@ -121,13 +124,15 @@ export function useTabCreationMenu({
   };
 
   // Keep unavailable future entries last on both surfaces.
-  return { items: [
-    ...items.filter(item => item.enabled),
-    ...pluginEntries.map(entry => ({
+  const pluginItems = pluginEntries.map(entry => ({
       kind: entry.kind, labelKey: 'rightSidebar.tabs.menu.pluginsLabel', labelText: entry.title,
       descriptionKey: 'rightSidebar.tabs.menu.pluginsLabel', icon: entry.icon, order: 0,
-      enabled: true, disabled: false, busy: false, group: 'plugins' as const, alreadyOpen: entry.open,
-    })),
+      enabled: true, disabled: false, busy: false, group: entry.workspace ? 'workspace' as const : 'plugins' as const, alreadyOpen: entry.open,
+  }));
+  return { items: [
+    ...pluginItems.filter(item => item.group === 'workspace'),
+    ...items.filter(item => item.enabled),
+    ...pluginItems.filter(item => item.group === 'plugins'),
     ...items.filter(item => !item.enabled),
   ], select };
 }

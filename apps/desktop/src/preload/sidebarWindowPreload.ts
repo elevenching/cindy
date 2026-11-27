@@ -332,6 +332,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 意识面板注册与运行所需的最小 bridge。右侧栏独立窗口会复用
   // ghostPanels/GhostChipPanelBody，但不暴露安装、卸载、开发运行时或权限管理能力。
   ghosts: {
+    resolveWorkspaceWeb: (instanceId: string, sessionId: string | null): Promise<import('../shared/ghostWorkspaceWeb').GhostWorkspaceWebPage | null> =>
+      ipcRenderer.invoke('ghosts:workspace-web:resolve', instanceId, sessionId),
     onModelPickerRequest: (cb: (request: import('../shared/pluginModelPicker').PluginModelPickerPresentation) => void) =>
       onPayload('ghosts:model-picker:request', cb),
     onModelPickerDismissed: (cb: (payload: { requestId: string }) => void) =>

@@ -49,3 +49,21 @@
   partition、CSP 和导航守门不变。`mainView` 本身不附赠联网、文件、凭证或其它能力；
 - 页面需要电子脑逻辑时仍先 `fetch('/wake')`，通信和媒体协议与 §5 完全相同。插件停用、
   卸载或失去批准后，Host 会卸载页面并退出该路由。
+
+### 桌面本机工作空间网页
+
+提供本机 Web 应用的插件可在 `mainView` 声明 `"workspaceWeb": "http://127.0.0.1:4458"`。
+端口必须显式固定。清单同时声明 `mainView.multiple: true`、包内回退 `mainView.html`、
+Node 工作进程、`sessionContext: true` 和 `preview.hosts: ["127.0.0.1"]`。
+主视图使用整页打开方式。Host 安装确认包含明确的回环源。旧版使用包内 HTML。
+
+左栏入口默认在「新建」下方，点开时以当前本机会话定位。右栏在「添加面板」前面提供同名入口。
+Host 调用 Node JSON-RPC 方法 `workspaceWeb.resolve` 并传 `{workdir: string | null}`。
+目录由 Host 按本机任务快照提供，远程或无可用目录时传 `null`。解析是只读操作，
+返回 `{workspaceId: string | null, path: string}`，路径必须是声明源内的绝对 URL 路径。
+`workspaceId: null` 时整页打开返回的首页，右栏显示无关联。不同会话解析到同一个 ID
+时复用同一个右栏网页，ID 只决定初次地址。页面内部导航由网页负责，切回来保留原实例。
+
+正式页面是隔离的顶层网页，不能访问插件包协议、Cindy preload、Node、弹窗或设备权限。
+请求和导航限于声明的回环源。关闭页签或停用插件时释放网页。仅支持 Desktop 本机，
+不通过手机或远程转发。开包前用实际目标宿主版本验收。

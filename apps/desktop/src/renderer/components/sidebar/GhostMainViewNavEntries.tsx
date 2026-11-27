@@ -7,8 +7,10 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useMatch, useNavigate } from 'react-router-dom';
+import { useLocation, useMatch, useNavigate } from 'react-router-dom';
 
+import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
+import { resolveAgentIslandVisibleSessionIdFromPath } from '@/lib/agentIslandVisibleSessionRoute';
 import { useGhostMainViews, type GhostMainViewItem } from '@/cindy-brain/ghostMainViews';
 import {
   DropdownMenu,
@@ -58,6 +60,8 @@ export function GhostMainViewNavEntry({
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const workspaceWeb = approvedGhostWorkspaceWebOrigin(item.installedGhost);
   const activeMatch = useMatch('/apps/:ghostId');
   const active = activeMatch?.params.ghostId === item.instanceId;
   const Icon = MAIN_VIEW_ICONS[item.icon];
@@ -69,9 +73,12 @@ export function GhostMainViewNavEntry({
       className="shrink-0"
     />
   );
-  const openPage = () => navigate(`/apps/${encodeURIComponent(item.instanceId)}`);
+  const openPage = () => navigate(`/apps/${encodeURIComponent(item.instanceId)}`, workspaceWeb ? {
+    state: { workspaceWebSessionId: resolveAgentIslandVisibleSessionIdFromPath(pathname) },
+  } : undefined);
   // 点击:已在侧边栏 / 窗口里就聚焦;否则按用户放置记忆 → 插件声明 → 内置默认(页面)。
   const open = () => {
+    if (workspaceWeb) { openPage(); return; }
     if (focusExistingPluginTab(item.installedGhost)) return;
     const target = resolvePluginOpenTarget(item.installedGhost);
     if (target === 'sidebar') void openPluginInSidebar(item.installedGhost);

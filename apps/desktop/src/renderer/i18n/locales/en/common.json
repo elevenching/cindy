@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "Could not open the local app. Check that it is running and try again.",
+    "noWorkspace": "No workspace is linked to this conversation.",
+    "retry": "Try again"
+  },
   "runtimePlugins": {
     "save": "Save",
     "promptUnsupported": "This Pi execution location does not support system prompt fragments.",

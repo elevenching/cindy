@@ -25,7 +25,7 @@
 import path from 'node:path';
 import { installNativeTrackpad } from './nativeTrackpad';
 
-import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron';
+import { app, session, BrowserWindow, type Session, type WebContents } from 'electron';
 import { CURRENT_APP_ID } from '../shared/brandRegion';
 
 import {
@@ -48,8 +48,14 @@ import {
   handleGhostPreviewNavigation,
   noteGhostUserGesture,
   resolveGhostWebviewAttach,
+  resolveGhostWorkspaceWebAttach,
   attachGhostPageModelPicker,
 } from './cindy-brain/index.js';
+import {
+  GHOST_WORKSPACE_WEB_PARTITION,
+  isGhostWorkspaceWebUrl,
+} from '../shared/ghostWorkspaceWeb.js';
+import { isTrustedAppRendererWindow } from './security/trustedAppRenderer.js';
 import { classifyGhostPanelNavigation } from './cindy-brain/previewGate.js';
 import { ghostMediaHandoverDragScript, ghostMediaHandoverTargetTracker } from './cindy-brain/ghostMediaHandoverTargetTracker.js';
 import { registerGhostWebContents } from './cindy-brain/runtime/electronSandboxAdapter.js';
@@ -982,6 +988,19 @@ export function installBrowserVideoReferrer(browserSession: Session): void {
   browserVideoReferrers.add(browserSession);
 }
 
+const guardedWorkspaceWebSessions = new WeakSet<Session>();
+
+function guardWorkspaceWebSession(webSession: Session, origin: string): void {
+  if (guardedWorkspaceWebSessions.has(webSession)) return;
+  webSession.setPermissionRequestHandler((_contents, _permission, reply) => reply(false));
+  webSession.setPermissionCheckHandler(() => false);
+  webSession.on('will-download', (event) => event.preventDefault());
+  webSession.webRequest.onBeforeRequest((details, reply) => {
+    reply({ cancel: !isGhostWorkspaceWebUrl(origin, details.url) });
+  });
+  guardedWorkspaceWebSessions.add(webSession);
+}
+
 export function installWebviewHardener(): void {
   app.on('web-contents-created', (_event, contents) => {
     // will-attach → did-attach 对同一个 guest 同步成对触发;用闭包变量把
@@ -989,11 +1008,38 @@ export function installWebviewHardener(): void {
     // 不装浏览器的 popup 路由与快捷键转发)。
     let pendingGhostAttach: ReturnType<typeof authorizeGhostWebviewAttach> = null;
     let pendingCaptchaAttach = false;
+    let pendingWorkspaceWeb: { current: () => boolean; origin: string } | null = null;
     let pendingRemoteSettings: ReturnType<typeof resolveRemoteSettingsAttach> = null;
     contents.on('will-attach-webview', (e, webPreferences, params) => {
       pendingCaptchaAttach = false;
       pendingRemoteSettings = null;
       pendingGhostAttach = null;
+      pendingWorkspaceWeb = null;
+      if (params.partition?.startsWith(GHOST_WORKSPACE_WEB_PARTITION)) {
+        const instanceId = params.partition.slice(GHOST_WORKSPACE_WEB_PARTITION.length);
+        const src = params.src;
+        const view = isTrustedAppRendererWindow(BrowserWindow.fromWebContents(contents)) &&
+          resolveGhostWorkspaceWebAttach(instanceId, src);
+        if (!view) { e.preventDefault(); return; }
+        try {
+          guardWorkspaceWebSession(session.fromPartition(view.partition), view.origin);
+        } catch {
+          e.preventDefault();
+          return;
+        }
+        params.partition = view.partition;
+        webPreferences.partition = view.partition;
+        applyGhostWebviewHardening(webPreferences as unknown as Record<string, unknown>, params);
+        delete params.preload;
+        delete webPreferences.enableBlinkFeatures;
+        webPreferences.experimentalFeatures = false;
+        webPreferences.navigateOnDragDrop = false;
+        pendingWorkspaceWeb = {
+          origin: view.origin,
+          current: () => resolveGhostWorkspaceWebAttach(instanceId, src)?.partition === view.partition,
+        };
+        return;
+      }
       if (typeof params.partition === 'string' && params.partition.startsWith(REMOTE_PLUGIN_SETTINGS_PARTITION)) {
         const view = resolveRemoteSettingsAttach(contents, params.partition, params.src);
         if (!view) { e.preventDefault(); return; }
@@ -1056,6 +1102,21 @@ export function installWebviewHardener(): void {
       );
     });
     contents.on('did-attach-webview', (_e, guestContents) => {
+      if (pendingWorkspaceWeb) {
+        const view = pendingWorkspaceWeb;
+        pendingWorkspaceWeb = null;
+        if (!view.current()) {
+          guestContents.close();
+          return;
+        }
+        guestContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        const guard = (event: Electron.Event, url: string) => {
+          if (!isGhostWorkspaceWebUrl(view.origin, url) || !view.current()) event.preventDefault();
+        };
+        guestContents.on('will-navigate', guard);
+        guestContents.on('will-redirect', guard);
+        return;
+      }
       if (pendingRemoteSettings) {
         const view = pendingRemoteSettings;
         pendingRemoteSettings = null;

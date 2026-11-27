@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "未能开启本机应用。请确认已启动，再试。",
+    "noWorkspace": "此对谈未连接工作空间。",
+    "retry": "再试"
+  },
   "runtimePlugins": {
     "save": "存之",
     "promptUnsupported": "此 Pi 所在之处不支持系统提示词片段。",

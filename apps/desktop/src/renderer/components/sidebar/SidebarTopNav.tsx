@@ -1,3 +1,4 @@
+import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
 /**
  * SidebarTopNav —— 侧栏顶部常驻动作/导航列表(取代原 HorizontalTabbar)。
  * ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ function useSidebarNavigationActions(
  */
 function useSidebarNavigationEntries(): {
   order: SidebarNavigationEntryId[];
+  workspaceApps: GhostMainViewItem[];
   hidden: SidebarNavigationEntryId[];
   isVisible: (id: SidebarNavigationEntryId) => boolean;
   appFor: (id: SidebarNavigationEntryId) => GhostMainViewItem | undefined;
@@ -178,7 +180,9 @@ function useSidebarNavigationEntries(): {
   const prefs = useSidebarNavigationPrefs(dataOwnerId);
   const { sidebarVisible } = useGhostMainViews();
   const rosterReady = useInstalledGhosts().length > 0;
-  const sidebarGhostIds = sidebarVisible.map((item) => item.instanceId).join('\n');
+  const workspaceApps = sidebarVisible.filter(item => approvedGhostWorkspaceWebOrigin(item.installedGhost));
+  const ordinaryApps = sidebarVisible.filter(item => !approvedGhostWorkspaceWebOrigin(item.installedGhost));
+  const sidebarGhostIds = ordinaryApps.map((item) => item.instanceId).join('\n');
   // Plugins entering the sidebar for the first time start in More, flagged as new.
   // Wait for the account and its installed roster: both are per data owner.
   useEffect(() => {
@@ -192,7 +196,7 @@ function useSidebarNavigationEntries(): {
   }, [dataOwnerId, sidebarGhostIds, rosterReady]);
   const unseenGhostIds = useSidebarUnseenApps(dataOwnerId);
   const apps = new Map(sidebarVisible.map((item) => [item.instanceId, item]));
-  const order = resolveSidebarNavigationOrder(prefs.order, sidebarVisible.map((item) => item.instanceId));
+  const order = resolveSidebarNavigationOrder(prefs.order, ordinaryApps.map((item) => item.instanceId));
   const isVisible = (id: SidebarNavigationEntryId) => ghostIdOfEntry(id) === null
     ? prefs.visible.includes(id as SidebarNavigationItemId)
     : prefs.appsAtTop.includes(id as SidebarNavigationAppEntryId);
@@ -208,7 +212,7 @@ function useSidebarNavigationEntries(): {
   const markSeen = () => {
     if (dataOwnerId) markSidebarAppArrivalsSeen(dataOwnerId);
   };
-  return { order, hidden, isVisible, appFor, unseen, markSeen };
+  return { order, workspaceApps, hidden, isVisible, appFor, unseen, markSeen };
 }
 
 /**
@@ -365,6 +369,7 @@ export function SidebarRailNavigation({
 
   return (
     <>
+      {entries.workspaceApps.map((app) => <GhostMainViewNavEntry key={app.instanceId} item={app} variant="rail" />)}
       {tiles.map((id) => {
         const app = entries.appFor(id);
         if (app) return <GhostMainViewNavEntry key={id} item={app} variant="rail" />;
@@ -662,6 +667,7 @@ export function SidebarTopNav({
           <span className="leading-none">{t('ccAgent.layout.new')}</span>
         </button>
       )}
+      {showPinned && entries.workspaceApps.map((app) => <GhostMainViewNavEntry key={app.instanceId} item={app} variant="row" />)}
       {showScrollable &&
         (customizing ? (
           <SidebarNavigationCustomize

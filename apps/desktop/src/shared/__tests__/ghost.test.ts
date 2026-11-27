@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveGhostWorkspaceWebPage } from '../ghostWorkspaceWeb';
 import { validateGhostManifest as validateProtocolManifest, validateStoredGhostManifest as validateStoredProtocolManifest, type GhostHostUi } from '@cindy/plugin-protocol';
 
 // 测试价值：validateGhostManifest 的主视图图标提示须在安装解析后保留，
@@ -5501,4 +5502,31 @@ it('lists fileOpener as its own permission, caps it to reviewed extensions and k
   const installed = validateInstalledGhostManifest({ ...base, node: undefined, fileOpener: { extensions: ['.docx'] } });
   expect(installed.ok).toBe(true);
   if (installed.ok) expect(installed.manifest.fileOpener).toBeUndefined();
+});
+
+// Unit, protocol-compatibility/plugin-workspace-web: neither the old main-view
+// capability nor an unsafe origin grants an external workspace page. Existing
+// main-view fixtures do not declare a port or exercise package updates.
+it('binds workspace web consent to the exact declared loopback origin in both manifest readers', () => {
+  const origin = 'http://127.0.0.1:4458';
+  const base = {
+    schemaVersion: 3, minCindyVersion: '0.1.125', id: 'local-workspace', name: 'Workspace',
+    version: '1.0.0', entry: 'main.js', sessionContext: true,
+    preview: { hosts: ['127.0.0.1'] }, node: { entry: 'worker.cjs', protocol: 'json-rpc-stdio' },
+  };
+  const mainView = { html: 'fallback.html', multiple: true, workspaceWeb: origin };
+  for (const validate of [validateGhostManifest, validateProtocolManifest]) {
+    expect(validate({ ...base, mainView })).toMatchObject({ ok: true, manifest: { mainView } });
+    expect(validate({ ...base, sessionContext: false, mainView }).ok).toBe(false);
+    for (const workspaceWeb of ['https://example.com', 'http://localhost:4458', origin + '/a', 'http://127.0.0.1:65536']) {
+      expect(validate({ ...base, mainView: { ...mainView, workspaceWeb } }).ok).toBe(false);
+    }
+  }
+  const before = validateGhostManifest({ ...base, mainView: { ...mainView, workspaceWeb: undefined } });
+  const after = validateGhostManifest({ ...base, mainView });
+  if (!before.ok || !after.ok) throw new Error('invalid test fixture');
+  expect(diffGhostPermissionItems(before.manifest, after.manifest).added.map(item => item.key)).toContain(`workspace-web:${origin}`);
+  expect(resolveGhostWorkspaceWebPage(origin, { workspaceId: 'a', path: '/workspaces/a/overview' }))
+    .toEqual({ workspaceId: 'a', url: origin + '/workspaces/a/overview' });
+  expect(resolveGhostWorkspaceWebPage(origin, { workspaceId: 'a', path: '//example.com' })).toBeNull();
 });

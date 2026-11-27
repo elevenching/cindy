@@ -37,6 +37,9 @@ MCP Apps 交互页面的 iframe 使用 `allow-scripts allow-same-origin allow-fo
 Desktop 本机、远程查看与 Mobile 的页面 CSP 始终保留 `form-action 'none'`，原生提交到任何地址均被禁止，
 不增加网络或凭证权限。依赖此行为的页面要求执行端与查看端均为 `0.1.122-beta` 或更新版本。
 
+本机工作空间网页显式绑定批准清单中的回环源，并运行在独立的插件与账户分区。读取
+会话目录、单源网页承载和旧版回退见[插件本机工作空间网页](protocol-compatibility/plugin-workspace-web.md)。
+
 ## 事实来源
 
 用量与供应商组读取（2026-11-16）：独立 `agent.hostTools:['usage']` 工具组提供

@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "ローカルアプリを開けません。アプリが起動していることを確認して、もう一度お試しください。",
+    "noWorkspace": "この会話に関連付けられたワークスペースはありません。",
+    "retry": "再試行"
+  },
   "runtimePlugins": {
     "save": "保存",
     "promptUnsupported": "この Pi の実行場所ではシステム指示の追加に対応していません。",

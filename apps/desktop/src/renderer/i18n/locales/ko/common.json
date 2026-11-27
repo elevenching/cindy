@@ -1,4 +1,9 @@
 {
+  "workspaceWeb": {
+    "unavailable": "로컬 앱을 열 수 없습니다. 앱이 실행 중인지 확인한 후 다시 시도하세요.",
+    "noWorkspace": "이 대화에 연결된 작업 공간이 없습니다.",
+    "retry": "다시 시도"
+  },
   "runtimePlugins": {
     "save": "저장",
     "promptUnsupported": "이 Pi 실행 위치는 시스템 지시 추가를 지원하지 않습니다.",
