@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { GhostWorkspaceWebBody } from '@/cindy-brain/GhostWorkspaceWebBody';
 import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
@@ -20,7 +20,6 @@ import { installedGhostStoragePart } from '../../../shared/pluginIdentity';
 export function GhostMainViewHost() {
   const { ghostId = '' } = useParams<{ ghostId: string }>();
   const navigate = useNavigate();
-  const { state } = useLocation();
   const { routeCapable } = useGhostMainViews();
   const item = routeCapable.find((candidate) => candidate.instanceId === ghostId);
   const runtimeState = useGhostRuntimeState(
@@ -38,6 +37,7 @@ export function GhostMainViewHost() {
   if (!item) return <div className="h-full w-full bg-content-area" />;
 
   const { manifest, installedGhost } = item;
+  const workspaceWeb = approvedGhostWorkspaceWebOrigin(installedGhost);
   const broken = runtimeState === 'crashed' || runtimeState === 'fused';
   return (
     <section
@@ -47,7 +47,7 @@ export function GhostMainViewHost() {
       {/* Replace a hidden header's drag area only outside fullscreen. A fullscreen
           window cannot be dragged, and the band would waste webview height.
           The shared header owns rail no-drag holes. */}
-      {isContentHeaderHidden && !isFullscreen && (
+      {isContentHeaderHidden && !isFullscreen && !workspaceWeb && (
         <div
           aria-hidden="true"
           data-testid="ghost-main-view-drag-band"
@@ -55,11 +55,11 @@ export function GhostMainViewHost() {
           style={{ height: CONTENT_HEADER_HEIGHT_PX, ...WINDOW_DRAG_STYLE }}
         />
       )}
-      {approvedGhostWorkspaceWebOrigin(installedGhost) ? (
+      {workspaceWeb ? (
         <GhostWorkspaceWebBody
           key={ghostInstallApprovalToken(installedGhost.approval) ?? item.instanceId}
           instanceId={item.instanceId}
-          sessionId={typeof state?.workspaceWebSessionId === 'string' ? state.workspaceWebSessionId : null}
+          sessionId={null}
           mode="main"
         />
       ) : broken ? (

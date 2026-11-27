@@ -57,9 +57,9 @@
 Node 工作进程、`sessionContext: true` 和 `preview.hosts: ["127.0.0.1"]`。
 主视图使用整页打开方式。Host 安装确认包含明确的回环源。旧版使用包内 HTML。
 
-左栏入口默认在「新建」下方，点开时以当前本机会话定位。右栏在「添加面板」前面提供同名入口。
+左栏入口默认在「新建」下方，点开后进入独立首页。右栏在「添加面板」前面提供同名入口。
 Host 调用 Node JSON-RPC 方法 `workspaceWeb.resolve` 并传 `{workdir: string | null}`。
-目录由 Host 按本机任务快照提供，远程或无可用目录时传 `null`。解析是只读操作，
+目录由 Host 按本机任务快照或当前新建会话选中的本机项目提供，远程、独立首页或无可用目录时传 `null`。解析是只读操作，
 返回 `{workspaceId: string | null, path: string}`，路径必须是声明源内的绝对 URL 路径。
 `workspaceId: null` 时整页打开返回的首页，右栏显示无关联。不同会话解析到同一个 ID
 时复用同一个右栏网页，ID 只决定初次地址。页面内部导航由网页负责，切回来保留原实例。

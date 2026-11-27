@@ -69,19 +69,17 @@ function reply(value) {
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
 }
 
-if (require.main === module) {
-  readline.createInterface({ input: process.stdin }).on('line', async line => {
-    let request;
-    try { request = JSON.parse(line); } catch { return; }
-    if (request?.id == null) return;
-    if (request.method !== 'workspaceWeb.resolve') {
-      reply({ id: request.id, error: { code: -32601, message: 'Method not found' } });
-      return;
-    }
-    try {
-      reply({ id: request.id, result: await resolveWorkspace(request.params?.workdir) });
-    } catch {
-      reply({ id: request.id, error: { code: -32000, message: 'Buildr registry unavailable' } });
-    }
-  });
-}
+readline.createInterface({ input: process.stdin }).on('line', async line => {
+  let request;
+  try { request = JSON.parse(line); } catch { return; }
+  if (request?.id == null) return;
+  if (request.method !== 'workspaceWeb.resolve') {
+    reply({ id: request.id, error: { code: -32601, message: 'Method not found' } });
+    return;
+  }
+  try {
+    reply({ id: request.id, result: await resolveWorkspace(request.params?.workdir) });
+  } catch {
+    reply({ id: request.id, error: { code: -32000, message: 'Buildr registry unavailable' } });
+  }
+});

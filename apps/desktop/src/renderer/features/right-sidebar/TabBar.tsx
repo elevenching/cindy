@@ -1,3 +1,6 @@
+import { approvedGhostWorkspaceWebOrigin } from '../../../shared/ghostWorkspaceWeb';
+import { readInstalledGhostsSnapshot } from '@/cindy-brain/useInstalledGhosts';
+import { installedGhostStoragePart } from '../../../shared/pluginIdentity';
 /**
  * TabBar — RSB 内容级 chrome(36px 单条),只装 tab pills + 「+」(+ Win 端右端 maximize / 折叠)。
  *
@@ -688,6 +691,15 @@ export function TabTitleLabel({ tab, sessionId }: { tab: TabState; sessionId: st
   );
 }
 
+function isWorkspaceWebTab(tab: TabState): boolean {
+  if (tab.kind !== 'plugin-view') return false;
+  const state = tab.state as { instanceId?: string; view?: string; resourceViewId?: string } | null;
+  if (!state?.instanceId || state.view === 'panel' || state.resourceViewId) return false;
+  return Boolean(approvedGhostWorkspaceWebOrigin(readInstalledGhostsSnapshot().find(
+    ghost => installedGhostStoragePart(ghost) === state.instanceId,
+  )));
+}
+
 function TabPill({
   tab,
   active,
@@ -704,7 +716,7 @@ function TabPill({
 }: {
   tab: TabState;
   active: boolean;
-  /** 全局页签:标题前带图钉,提示它不随任务切换。 */
+  /** Global tab group membership. */
   pinned?: boolean;
   /** 见 TabStripProps.pillVariant:flush = 贴底三边框 tab,chip = 居中四边框 chip。 */
   pillVariant: 'flush' | 'chip';
@@ -770,7 +782,7 @@ function TabPill({
         onClick={onActivate}
         className="flex items-center gap-1.5 max-w-[160px]"
       >
-        {pinned && (
+        {pinned && !isWorkspaceWebTab(tab) && (
           <Pin
             size={10}
             aria-label={t('rightSidebar.tabs.pinnedAria')}

@@ -124,7 +124,9 @@ it('keeps the same guest when returning after navigating within a workspace page
   await waitFor(() => expect(visibleGuest()).toBe(navigatedGuest));
   rerender(body('b', '/b'));
   await waitFor(() => expect(visibleGuest()?.getAttribute('src')).toBe(second.url));
-  rerender(body('a', '/a'));
+  rerender(body('__new_maker_project_draft__:local:/a', '/a'));
+  expect(visibleGuest()).toBe(navigatedGuest);
+  rerender(body('a-new-session', '/a'));
   expect(visibleGuest()).toBe(navigatedGuest);
   expect(visibleGuest()?.getAttribute('src')).toBe(manualPath);
   expect(resolveWorkspaceWeb).toHaveBeenCalledTimes(3);

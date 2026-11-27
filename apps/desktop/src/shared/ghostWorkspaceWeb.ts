@@ -1,6 +1,8 @@
 import { hasGhostWorkspaceWebPrerequisites, isGhostWorkspaceWebOrigin } from '@cindy/plugin-protocol';
 import type { InstalledGhost } from './ghost';
 
+export const LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX = '__new_maker_project_draft__:local:';
+
 export const GHOST_WORKSPACE_WEB_PARTITION = 'cindy-workspace-web:';
 
 export interface GhostWorkspaceWebPage {

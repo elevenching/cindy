@@ -1,3 +1,4 @@
+import { LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX } from '../../../shared/ghostWorkspaceWeb';
 import type { CSSProperties } from 'react';
 
 import { NEW_MAKER_DRAFT_KEY } from './newMakerDraftKeys';
@@ -28,7 +29,7 @@ export const DRAFT_RIGHT_SIDEBAR_TOGGLE_DRAG_STYLE = {
  * 用 workdir 做内存态临时桶，避免项目 A 的右栏 tab 泄漏到项目 B。
  */
 export function makeProjectDraftRightSidebarSessionId(workdir: string): string {
-  return `${PROJECT_DRAFT_RSB_SESSION_PREFIX}local:${workdir}`;
+  return `${LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX}${workdir}`;
 }
 
 /**

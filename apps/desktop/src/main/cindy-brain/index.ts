@@ -1,4 +1,4 @@
-import { approvedGhostWorkspaceWebOrigin, isGhostWorkspaceWebUrl, resolveGhostWorkspaceWebPage } from '../../shared/ghostWorkspaceWeb.js';
+import { LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX, approvedGhostWorkspaceWebOrigin, isGhostWorkspaceWebUrl, resolveGhostWorkspaceWebPage } from '../../shared/ghostWorkspaceWeb.js';
 import { assertConfirmedGhostUninstallOwner, readConfirmedGhostUninstall } from './confirmedGhostUninstall.js';
 import type { ConfirmedGhostUninstall } from '../../shared/ghost.js';
 import { readGithubAppToken } from '../git-context/githubAppAuthorization.desktop.js';
@@ -10817,7 +10817,7 @@ export function registerGhostIpc(): void {
       throwIpcError('PERMISSION_DENIED', 'Workspace web pages are only available on the desktop');
     }
     if (typeof instanceId !== 'string' || !isPluginInstanceKey(instanceId) ||
-        (sessionId !== null && (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 128))) {
+        (sessionId !== null && (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > (sessionId.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX) ? 4096 : 128)))) {
       throwIpcError('INVALID_REQUEST', 'Invalid workspace web page request');
     }
     const initial = findGhostForInstanceId(instanceId);
@@ -10830,10 +10830,13 @@ export function registerGhostIpc(): void {
       return !!ghost && isDataOwnerBroadcastScopeCurrent(scope) &&
         approvedGhostWorkspaceWebOrigin(ghost) === origin && ghostInstallApprovalToken(ghost.approval) === approval;
     };
-    const row = typeof sessionId === 'string' ? await getSessionFsSnapshot(sessionId) : null;
+    const draftPath = typeof sessionId === 'string' && sessionId.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX)
+      ? sessionId.slice(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX.length) : null;
+    const row = typeof sessionId === 'string' && draftPath === null ? await getSessionFsSnapshot(sessionId) : null;
     if (!current()) return null;
-    const workdir = row && !row.remoteHostId && row.workingDir &&
-      !isGhostDisabledForWorkdir(instanceId, row.workingDir) ? row.workingDir : null;
+    const localPath = draftPath ?? (row && !row.remoteHostId ? row.workingDir : null);
+    const workdir = localPath && path.isAbsolute(localPath) && !localPath.includes('\0') &&
+      !isGhostDisabledForWorkdir(instanceId, localPath) ? localPath : null;
     const result = await getGhostNodeRuntimeBroker().handleRequest(instanceId, {
       type: 'node-request',
       method: 'workspaceWeb.resolve',

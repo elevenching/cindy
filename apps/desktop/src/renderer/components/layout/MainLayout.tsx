@@ -1,3 +1,6 @@
+import { approvedGhostWorkspaceWebOrigin, LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX } from '../../../shared/ghostWorkspaceWeb';
+import { getTabGroup } from '@/features/right-sidebar/tabGroups';
+import { isTabPoppedOut } from '@/lib/sidebarTabWindowState';
 import { useRightSidebarMaximizeEscape } from './useRightSidebarMaximizeEscape';
 import { toast } from '@/lib/toast';
 import { openSettingsNavigation } from '@/lib/settingsNavigation';
@@ -81,6 +84,8 @@ import {
 import { browserWebviewPool } from '@/features/right-sidebar/lib/browserWebviewPool';
 import {
   findGlobalTab,
+  findGlobalTabByInstance,
+  getActiveGlobalTabId,
   rememberPluginWindowPlacement,
   setActiveGlobalTabId,
   type PluginViewTabState,
@@ -1049,8 +1054,24 @@ export function MainLayout() {
 
   // sessionId 切换时按新 session 的存档刷新折叠态。无需 prime 动画 —— RightSidebar 默认
   // 直接同步,切 session "瞬间生效"(用户体感:不应看着一栏慢慢展开/收起)。
+  const previousSidebarSession = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!rsbWindow.loaded || !rightSidebarSessionId || rsbDetached) return;
+    const previous = previousSidebarSession.current;
+    previousSidebarSession.current = rightSidebarSessionId;
+    const draft = rightSidebarSessionId.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX);
+    const fromDraft = Boolean(previous?.startsWith(LOCAL_PROJECT_DRAFT_SIDEBAR_PREFIX));
+    if (draft || fromDraft) {
+      const workspaceTab = readInstalledGhostsSnapshot()
+        .filter(ghost => approvedGhostWorkspaceWebOrigin(ghost))
+        .map(ghost => findGlobalTabByInstance(installedGhostStoragePart(ghost)))
+        .find(tab => tab && getTabGroup(tab.id) === 'right' && !isTabPoppedOut(tab.id));
+      if (workspaceTab && (draft || getActiveGlobalTabId() === workspaceTab.id)) {
+        setActiveGlobalTabId(workspaceTab.id);
+        setIsRightSidebarCollapsed(false);
+        return;
+      }
+    }
     setIsRightSidebarCollapsed(readCollapsedFor(rightSidebarSessionId));
   }, [rightSidebarSessionId, rsbDetached, rsbWindow.loaded]);
 
