@@ -172,7 +172,7 @@ function createFakeAgent(options: FakeAgentOptions = {}) {
   function requestClient(method: string, params: AcpRecord): Promise<AcpRecord> {
     const id = nextAgentRequestId++;
     return new Promise((resolve) => {
-      pendingAgentRequests.set(id, resolve);
+      pendingAgentRequests.set(id, (msg) => resolve((msg.result ?? {}) as AcpRecord));
       toClient({ jsonrpc: '2.0', id, method, params: { sessionId: 'sess-1', ...params } });
     });
   }
