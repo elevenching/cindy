@@ -67,3 +67,8 @@ Host 调用 Node JSON-RPC 方法 `workspaceWeb.resolve` 并传 `{workdir: string
 正式页面是隔离的顶层网页，不能访问插件包协议、Cindy preload、Node、弹窗或设备权限。
 请求和导航限于声明的回环源。关闭页签或停用插件时释放网页。仅支持 Desktop 本机，
 不通过手机或远程转发。开包前用实际目标宿主版本验收。
+
+工作空间网页可通过 CSS 变量读取当前 Cindy 主题。Host 在文档加载和主题切换时更新
+`--cindy-workspace-canvas`、`--cindy-workspace-surface`、`--cindy-workspace-sidebar`、
+`--cindy-workspace-text`、`--cindy-workspace-muted`、`--cindy-workspace-border` 与
+`color-scheme`。网页自行将这些颜色绑定到样式，独立浏览器访问可用 CSS fallback。

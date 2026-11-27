@@ -207,6 +207,25 @@ export function observeHostTheme(onChange: () => void): () => void {
   return () => observer.disconnect();
 }
 
+/** Workspace pages opt in by consuming the host's semantic colors. */
+export function buildGhostWorkspaceThemeCss(sidebar: boolean): string {
+  const style = getComputedStyle(document.documentElement);
+  const tokens = {
+    canvas: sidebar ? '--panel-bg' : '--content-area',
+    surface: '--surface-elevated',
+    sidebar: '--panel-bg',
+    text: '--text-primary',
+    muted: '--text-secondary',
+    border: '--border-default',
+  };
+  const colors = Object.entries(tokens).flatMap(([role, token]) => {
+    const value = style.getPropertyValue(token).trim();
+    return value && isSafeGhostThemeValue(value) && CSS.supports('color', value)
+      ? [`--cindy-workspace-${role}: ${value};`] : [];
+  });
+  return `:root { color-scheme: ${readHostColorScheme()}; ${colors.join(' ')} }`;
+}
+
 /** createGhostThemeInjector 需要的 webview 能力子集(便于单测注入 mock)。 */
 export interface ThemeInjectableWebview {
   insertCSS(css: string): Promise<string>;

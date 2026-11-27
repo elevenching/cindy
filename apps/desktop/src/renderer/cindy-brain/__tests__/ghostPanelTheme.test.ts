@@ -8,6 +8,7 @@ import {
   buildGhostSettingsThemeCss,
   buildGhostThemeCss,
   buildGhostThemeVarsBlock,
+  buildGhostWorkspaceThemeCss,
   createGhostThemeInjector,
   isSafeGhostThemeValue,
   observeHostTheme,
@@ -347,3 +348,28 @@ function withCapturedCss(build: () => string, colorScheme: string): string {
   );
   return css;
 }
+
+// Unit: workspace guests have a separate palette contract. Existing sandbox
+// tests do not distinguish the main content canvas from the sidebar canvas.
+it('projects only semantic colors for the current workspace surface', () => {
+  const root = document.documentElement;
+  const savedStyle = root.getAttribute('style');
+  vi.stubGlobal('CSS', { supports: (_property: string, value: string) => /^#[0-9a-f]{6}$/i.test(value) });
+  try {
+    root.style.setProperty('--content-area', '#fafafa');
+    root.style.setProperty('--panel-bg', '#ececec');
+    root.style.setProperty('--text-primary', '#202020');
+    root.style.setProperty('--border-default', '#ffffff; background:red');
+    root.style.colorScheme = 'dark';
+    expect(buildGhostWorkspaceThemeCss(false)).toContain('--cindy-workspace-canvas: #fafafa');
+    const sidebar = buildGhostWorkspaceThemeCss(true);
+    expect(sidebar).toContain('--cindy-workspace-canvas: #ececec');
+    expect(sidebar).toContain('--cindy-workspace-text: #202020');
+    expect(sidebar).toContain('color-scheme: dark');
+    expect(sidebar).not.toContain('background:red');
+  } finally {
+    if (savedStyle === null) root.removeAttribute('style');
+    else root.setAttribute('style', savedStyle);
+    vi.unstubAllGlobals();
+  }
+});

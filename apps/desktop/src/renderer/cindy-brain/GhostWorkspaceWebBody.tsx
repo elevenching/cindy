@@ -1,5 +1,7 @@
+import type { WebviewTag } from 'electron';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { buildGhostWorkspaceThemeCss, createGhostThemeInjector, observeHostTheme } from './ghostPanelTheme';
 
 import { Button } from '@/components/ui/button';
 import { ErrorNotice } from '@/components/ui/error-notice';
@@ -18,7 +20,7 @@ interface Props {
   visible?: boolean;
 }
 
-function WorkspaceGuest({ instanceId, url }: { instanceId: string; url: string }) {
+function WorkspaceGuest({ instanceId, url, sidebar }: { instanceId: string; url: string; sidebar: boolean }) {
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
@@ -26,7 +28,15 @@ function WorkspaceGuest({ instanceId, url }: { instanceId: string; url: string }
   useEffect(() => {
     const host = container.current;
     if (!host) return;
-    const guest = document.createElement('webview');
+    const guest = document.createElement('webview') as WebviewTag;
+    const theme = createGhostThemeInjector(guest, () => buildGhostWorkspaceThemeCss(sidebar));
+    let stopObserving: (() => void) | undefined;
+    const onReady = () => {
+      if (typeof guest.insertCSS !== 'function') return;
+      theme.onDomReady();
+      stopObserving ??= observeHostTheme(theme.inject);
+    };
+    guest.addEventListener('dom-ready', onReady);
     const onLoadFailure = (event: Event) => {
       const failure = event as Electron.DidFailLoadEvent;
       if (failure.isMainFrame && failure.errorCode !== -3) setFailed(true);
@@ -38,8 +48,12 @@ function WorkspaceGuest({ instanceId, url }: { instanceId: string; url: string }
     guest.addEventListener('did-fail-load', onLoadFailure);
     guest.addEventListener('render-process-gone', onGone);
     host.append(guest);
-    return () => guest.remove();
-  }, [attempt, instanceId, url]);
+    return () => {
+      stopObserving?.();
+      theme.dispose();
+      guest.remove();
+    };
+  }, [attempt, instanceId, sidebar, url]);
 
   return (
     <div className="relative h-full min-h-0 w-full">
@@ -102,7 +116,7 @@ export function GhostWorkspaceWebBody({ instanceId, sessionId, directoryKey, mod
     <div className="relative h-full min-h-0 w-full flex-1 overflow-hidden">
       {[...guests].map(([guestKey, page]) => (
         <div key={guestKey} hidden={guestKey !== active} className="absolute inset-0">
-          <WorkspaceGuest instanceId={instanceId} url={page.url} />
+          <WorkspaceGuest instanceId={instanceId} url={page.url} sidebar={mode === 'sidebar'} />
         </div>
       ))}
       {unavailable ? (
