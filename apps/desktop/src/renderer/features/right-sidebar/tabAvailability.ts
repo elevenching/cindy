@@ -30,6 +30,18 @@ export interface RightSidebarTabAvailability {
   workspaceWebScope?: 'local' | 'global' | 'remote';
 }
 
+/** Conversation tabs keep their own IDs, but a workspace webpage has one host per plugin. */
+export function getWorkspaceWebTabHostId(tab: TabState, ghosts: readonly InstalledGhost[]): string | undefined {
+  if (tab.kind !== 'plugin-view') return undefined;
+  const state = tab.state as PluginViewTabState | null;
+  if (!state?.instanceId || state.resourceViewId || state.view === 'panel') return undefined;
+  const ghost = ghosts.find(candidate => installedGhostStoragePart(candidate) === state.instanceId);
+  if (ghost?.manifest.id === 'buildr-workspace' && approvedGhostWorkspaceWebOrigin(ghost)) {
+    return `workspace-web:${state.instanceId}`;
+  }
+  return undefined;
+}
+
 function isUnavailablePluginView(
   tab: TabState,
   availability: RightSidebarTabAvailability,

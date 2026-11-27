@@ -82,6 +82,7 @@ import {
 } from './globalTabs';
 import {
   buildTabAvailabilities,
+  getWorkspaceWebTabHostId,
   mergeAvailableTabOrder,
   projectAvailableTabs,
 } from './tabAvailability';
@@ -865,7 +866,11 @@ export function RightSidebarShell({
     tabs
       .filter((tab) => contentReady || pinnedTabIds.has(tab.id))
       .filter((tab) => tab.id === activeTabId || deferredMountedTabIds.has(tab.id))
-      .map((tab) => ({ tab, sessionId, workdir, remoteHostId, deviceLinkDeviceId })),
+      .map((tab) => ({
+        tab, sessionId, workdir, remoteHostId, deviceLinkDeviceId,
+        workspaceHostId: getWorkspaceWebTabHostId(tab, installedGhosts),
+      })),
+    installedGhosts,
   );
   // 全局页签的 wrapper 在 keyed 列表里排最前、彼此顺序稳定:useRetainedBrowserTabHosts 会把
   // 浏览器页签排到前面,不重排的话 React 为了让位会移动全局页签的 wrapper,断开里面的 webview guest。
@@ -1028,7 +1033,7 @@ export function RightSidebarShell({
             and task context; the pool still decides when to release them. */}
         {bodyHosts.map((host) => (
           <PluginBodyHost
-            key={host.tab.id}
+            key={host.workspaceHostId ?? host.tab.id}
             {...host}
             active={host.sessionId === sessionId && host.tab.id === activeTabId}
             shellVisible={shellVisible}

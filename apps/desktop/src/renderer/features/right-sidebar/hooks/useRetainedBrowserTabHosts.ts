@@ -4,9 +4,12 @@ import { browserWebviewPool } from '../lib/browserWebviewPool';
 import { isTabHostedHere } from '../lib/tabHosting';
 import { getBucket, subscribe } from '../store';
 import type { TabState } from '../types';
+import type { InstalledGhost } from '../../../../shared/ghost';
+import { getWorkspaceWebTabHostId } from '../tabAvailability';
 
 export interface TabBodyHostDescriptor {
   tab: TabState;
+  workspaceHostId?: string;
   sessionId: string | null;
   workdir: string;
   remoteHostId: string | null;
@@ -18,16 +21,17 @@ function canHostGuest(tab: TabState): boolean {
 }
 
 /**
- * Keep the slots of live browser and file preview guests connected when their task leaves the
+ * Keep the slots of live browser, file preview and workspace webpage guests connected when their task leaves the
  * sidebar. Moving a pooled webview to parking and back recreates its Electron
  * guest, even when the wrapper DOM object itself survives.
  *
- * The pool remains the sole resource budget: retention never acquires or pins
- * a guest. Close, eviction and host handoff remove the corresponding hidden
- * body. File listings and other tabs without a live guest are not retained.
+ * Browser and file preview guests remain bound to the pool. Workspace webpages
+ * share one body per plugin in this window, while each task still owns its tab
+ * state. Closing the tab or handing it off releases the hidden body.
  */
 export function useRetainedBrowserTabHosts(
   current: readonly TabBodyHostDescriptor[],
+  installedGhosts: readonly InstalledGhost[],
 ): TabBodyHostDescriptor[] {
   const previous = useRef<readonly TabBodyHostDescriptor[]>([]);
   const [, refresh] = useState(0);
@@ -45,22 +49,27 @@ export function useRetainedBrowserTabHosts(
   }, []);
 
   const hosts: TabBodyHostDescriptor[] = [];
-  const remaining = new Map(current.map((host) => [host.tab.id, host]));
+  const remaining = new Map(current.map((host) => [host.workspaceHostId ?? host.tab.id, host]));
   for (const host of previous.current) {
-    const foreground = remaining.get(host.tab.id);
+    const hostId = host.workspaceHostId ?? host.tab.id;
+    const foreground = remaining.get(hostId);
     if (foreground) {
       hosts.push(foreground);
-      remaining.delete(host.tab.id);
+      remaining.delete(hostId);
       continue;
     }
     // 页签已不由本 renderer 承载(弹出到别的窗口 / 从多页签窗口合并回去):不再保留它的后台 body。
     if (!host.sessionId || !isTabHostedHere(host.tab.id)) continue;
-    if (!browserWebviewPool.peek(host.tab.id)) continue;
+    if (!host.workspaceHostId && !browserWebviewPool.peek(host.tab.id)) continue;
     // Background navigation/close updates belong to the original task. Never
     // reuse the foreground task's context or revive a tab missing from its bucket.
     const bucket = getBucket(host.sessionId);
     const tab = bucket.hydrated && bucket.tabs.find((candidate) => candidate.id === host.tab.id);
-    if (tab && canHostGuest(tab)) hosts.push({ ...host, tab });
+    if (
+      tab && (host.workspaceHostId
+        ? getWorkspaceWebTabHostId(tab, installedGhosts) === host.workspaceHostId
+        : canHostGuest(tab))
+    ) hosts.push({ ...host, tab });
   }
   // Stable browser order matters too: React moving an ancestor of a webview
   // within this list disconnects the guest just like reparenting its wrapper.
@@ -69,7 +78,7 @@ export function useRetainedBrowserTabHosts(
   useLayoutEffect(() => {
     // Capture current candidates too: their child effects may materialize the
     // guest later in this commit, before the user can switch tasks.
-    previous.current = hosts.filter(({ tab }) => canHostGuest(tab));
+    previous.current = hosts.filter(({ tab, workspaceHostId }) => workspaceHostId || canHostGuest(tab));
   });
 
   return hosts;

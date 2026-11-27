@@ -2469,6 +2469,41 @@ describe('RightSidebarShell 全局页签跨任务存活', () => {
     expect([mounted('beta'), unmounted('beta')]).toEqual([1, 0]);
   });
 
+  // Unit: separate conversation tab IDs and delayed destination hydration
+  // previously destroyed the Buildr host even when both use the same folder.
+  it('keeps the Buildr page host mounted while switching conversation tabs', async () => {
+    installedGhostsMock.list = [{
+      enabled: true, approval: { state: 'approved', revision: 'r1' },
+      manifest: {
+        id: 'buildr-workspace', name: 'Buildr', sessionContext: true,
+        preview: { hosts: ['127.0.0.1'] }, node: { entry: 'worker.cjs' },
+        mainView: { html: 'page.html', workspaceWeb: 'http://127.0.0.1:4458' },
+      },
+    }];
+    let release!: () => void;
+    const waitForTaskB = new Promise<void>(resolve => { release = resolve; });
+    tabsIpc.list.mockImplementation(async ({ sessionId }: { sessionId: string }) => {
+      if (sessionId === 'task-b') await waitForTaskB;
+      const tabId = `buildr-${sessionId}`;
+      return { tabs: [{
+        id: tabId, kind: 'plugin-view',
+        state: { instanceId: 'buildr-workspace', view: 'main' },
+      }], activeTabId: tabId };
+    });
+    const { rerender } = render(renderShell('task-a'));
+    const body = await screen.findByTestId('body-buildr-workspace');
+
+    rerender(renderShell('task-b'));
+    expect(screen.getByTestId('body-buildr-workspace')).toBe(body);
+    await act(async () => release());
+    await waitFor(() => expect(getBucket('task-b').hydrated).toBe(true));
+    expect(screen.getByTestId('body-buildr-workspace')).toBe(body);
+    rerender(renderShell('task-a'));
+    expect(screen.getByTestId('body-buildr-workspace')).toBe(body);
+    expect([mounted('buildr-workspace'), unmounted('buildr-workspace')]).toEqual([1, 0]);
+  });
+
+
   // 测试价值
   // - 生产入口与可观察结果:同上;可观察的是目标任务的桶还没水合(list 挂起)的这段时间里,
   //   已挂载全局页签的卸载次数与任务页签是否在场,以及水合后任务页签出现。

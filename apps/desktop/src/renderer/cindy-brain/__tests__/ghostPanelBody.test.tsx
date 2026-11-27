@@ -129,7 +129,9 @@ it('keeps the same guest when returning after navigating within a workspace page
   rerender(body('a-new-session', '/a'));
   expect(visibleGuest()).toBe(navigatedGuest);
   expect(visibleGuest()?.getAttribute('src')).toBe(manualPath);
-  expect(resolveWorkspaceWeb).toHaveBeenCalledTimes(3);
+  // Revisiting a cached directory checks the service again. That check must
+  // not attach a new WebView or reset the page's navigation.
+  expect(resolveWorkspaceWeb).toHaveBeenCalledTimes(4);
 });
 
 it('loads the installed app home in the full page when no conversation is open', async () => {
