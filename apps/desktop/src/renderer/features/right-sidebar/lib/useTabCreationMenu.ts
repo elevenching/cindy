@@ -41,11 +41,13 @@ export interface TabCreationMenu {
 export function useTabCreationMenu({
   sessionId,
   subagentsAvailable,
+  reviewAvailable = true,
   onSelect,
   sideChatPlacement,
 }: {
   sessionId: string | null | undefined;
   subagentsAvailable: boolean;
+  reviewAvailable?: boolean;
   onSelect: (kind: TabKindId) => void;
   sideChatPlacement?: SideChatTabPlacement;
 }): TabCreationMenu {
@@ -80,6 +82,7 @@ export function useTabCreationMenu({
   const items = listTabKindMenuMetas().filter(item => {
     if (item.kind.startsWith('ghost:')) return false;
     if (item.kind === 'subagents' && !subagentsAvailable) return false;
+    if (item.kind === 'review' && !reviewAvailable) return false;
     if (item.kind === 'side-chat' && (isBotSession || !canOpenSideChat(session))) return false;
     return !isBotSession || !BOT_SECONDARY_KINDS.has(item.kind);
   }).map(item => {
