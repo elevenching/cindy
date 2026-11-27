@@ -63,10 +63,16 @@ export function GhostMainViewNavEntry({
   const activeMatch = useMatch('/apps/:ghostId');
   const active = activeMatch?.params.ghostId === item.instanceId;
   const Icon = MAIN_VIEW_ICONS[item.icon];
-  const icon = (
+  const iconSize = variant === 'row' ? 15 : 18;
+  const icon = workspaceWeb && item.ghostId === 'buildr-workspace' ? (
+    <svg aria-hidden="true" width={iconSize} height={iconSize} viewBox="238 166 548 692" className="shrink-0" fill="currentColor">
+      <path d="M328 287 487 195l224 130q23 13 23 41v99l-78 45-43-25v-74l-135-78-36 21v82l-114-66z" />
+      <path d="m328 407 114 67v203l64 38 107-60v-39l-142-81v-42l79-44 161 93q23 14 23 41v78q0 26-23 40l-62 36 5 3-149 89-221-127v-38l44-26z" />
+    </svg>
+  ) : (
     <Icon
       aria-hidden="true"
-      size={variant === 'row' ? 15 : 18}
+      size={iconSize}
       strokeWidth={1.8}
       className="shrink-0"
     />
