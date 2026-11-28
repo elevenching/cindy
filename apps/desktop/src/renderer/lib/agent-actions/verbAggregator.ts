@@ -139,7 +139,7 @@ export function verbLabelKeyForRow(verb: Verb): string {
 }
 
 /** Aggregate a flat list of tool_use messages into the segment summary. */
-export function aggregateVerbs(toolCalls: ChatMessage[]): AgentActionSummary {
+export function aggregateVerbs(toolCalls: readonly Pick<ChatMessage, 'toolName'>[]): AgentActionSummary {
   const counter = new Map<Verb, number>();
   for (const msg of toolCalls) {
     const v = verbForTool(msg.toolName ?? '');

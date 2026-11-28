@@ -20,6 +20,7 @@ import { segmentTeammateWork, summarizeTeammateWork, teammateWorkSummaryText } f
  * 时长缺失(老历史数据没有 createdAt)时退化为「工作过程」文案,不显示时间。
  */
 
+import { aggregateVerbs, formatSummary } from '@/lib/agent-actions/verbAggregator';
 import { CHAT_CHEVRON_TRANSITION_CLASS } from './chatChrome';
 import {
   Fragment,
@@ -123,18 +124,24 @@ export interface WorkGroupBlockProps {
   childItems: WorkGroupChild[];
   /** The header hugs its text (teammate chats) instead of pinning the chevron to the far edge. */
   fitHeader?: boolean;
+  showLivePreview?: boolean;
   journal?: boolean;
   journalTitle?: ReactNode | ((elapsed: ReactNode) => ReactNode);
 }
 
-function ToolActivityRow({ activity, pluginUi }: { activity: ProjectedToolActivity; pluginUi: WorkGroupBlockProps['pluginUi'] }) {
+function ToolActivityRow({ activity, pluginUi, compactDetails = false }: {
+  activity: ProjectedToolActivity;
+  pluginUi: WorkGroupBlockProps['pluginUi'];
+  compactDetails?: boolean;
+}) {
   return (
     <div data-live-work-activity="tool" className="w-full min-w-0">
       <AgentActionRow
         pluginUi={pluginUi}
         message={activity.message}
         toolResult={activity.toolResult}
-        showRawCommand
+        showRawCommand={!compactDetails}
+        compactDetails={compactDetails}
         status={activity.status}
         intentOverride={activity.intentOverride}
       />
@@ -142,31 +149,37 @@ function ToolActivityRow({ activity, pluginUi }: { activity: ProjectedToolActivi
   );
 }
 
-function ThinkingActivityRow({ activity }: { activity: ProjectedThinkingActivity }) {
+function ThinkingActivityRow({ activity, hideExcerpt = false }: {
+  activity: ProjectedThinkingActivity;
+  hideExcerpt?: boolean;
+}) {
+  const { t } = useTranslation();
   const rawContent = activity.rawContent;
   const hasExplicitLineBreak = /[\r\n]/.test(rawContent);
   const textRef = useRef<HTMLSpanElement>(null);
-  const [canExpand, setCanExpand] = useState(hasExplicitLineBreak);
+  const [excerptOverflows, setExcerptOverflows] = useState(hasExplicitLineBreak);
+  const canExpand = hideExcerpt || excerptOverflows;
   const { expanded, setExpanded } = useExpandedBlockMemory(`thinking:${activity.key}`);
 
   useLayoutEffect(() => {
+    if (hideExcerpt) return;
     if (expanded) {
-      setCanExpand(true);
+      setExcerptOverflows(true);
       return;
     }
     const textElement = textRef.current;
     if (!textElement) return;
     const updateOverflow = () => {
-      setCanExpand(hasExplicitLineBreak || textElement.scrollWidth > textElement.clientWidth + 1);
+      setExcerptOverflows(hasExplicitLineBreak || textElement.scrollWidth > textElement.clientWidth + 1);
     };
     updateOverflow();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(updateOverflow);
     observer.observe(textElement);
     return () => observer.disconnect();
-  }, [activity.content, expanded, hasExplicitLineBreak]);
+  }, [activity.content, expanded, hasExplicitLineBreak, hideExcerpt]);
 
-  return (
+  const header = (
     <button
       type="button"
       data-live-work-activity="thinking"
@@ -179,7 +192,7 @@ function ThinkingActivityRow({ activity }: { activity: ProjectedThinkingActivity
       className={cn(
         'flex w-full min-w-0 gap-1.5 px-2 py-0.5 text-left outline-none',
         ACTIVITY_ROW_RADIUS_CLASS,
-        expanded ? 'items-start' : 'items-center',
+        expanded && !hideExcerpt ? 'items-start' : 'items-center',
         canExpand
           ? [
               'group cursor-pointer select-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
@@ -199,11 +212,13 @@ function ThinkingActivityRow({ activity }: { activity: ProjectedThinkingActivity
         ref={textRef}
         className={cn(
           'min-w-0 flex-1 text-14 italic text-[var(--thinking-body-text)]',
-          expanded ? 'whitespace-pre-wrap break-words' : 'truncate',
+          expanded && !hideExcerpt ? 'whitespace-pre-wrap break-words' : 'truncate',
         )}
-        title={expanded ? undefined : activity.content}
+        title={expanded || hideExcerpt ? undefined : activity.content}
       >
-        <ThinkingText content={expanded ? rawContent : activity.content} />
+        {hideExcerpt
+          ? t('chat.teammateProcess.thought')
+          : <ThinkingText content={expanded ? rawContent : activity.content} />}
       </span>
       <span aria-hidden="true" className={ACTIVITY_ROW_CHEVRON_SLOT_CLASS}>
         {canExpand ? (
@@ -214,6 +229,17 @@ function ThinkingActivityRow({ activity }: { activity: ProjectedThinkingActivity
         ) : null}
       </span>
     </button>
+  );
+  if (!hideExcerpt) return header;
+  return (
+    <div className="min-w-0">
+      {header}
+      <Collapse open={expanded}>
+        <div className="ml-7 py-1 whitespace-pre-wrap break-words select-text text-14 text-[var(--thinking-body-text)]">
+          <ThinkingText content={rawContent} />
+        </div>
+      </Collapse>
+    </div>
   );
 }
 
@@ -297,7 +323,7 @@ function ThinkingLineRow({
 
 /** 展开动作段里的 thinking:与 live preview 共用 ThinkingActivityRow,
  *  保证右侧三角槽同一套布局;redacted 仍走 ThinkingCard。 */
-function ExpandedThinkingRow({ message }: { message: ChatMessage }) {
+function ExpandedThinkingRow({ message, hideExcerpt }: { message: ChatMessage; hideExcerpt: boolean }) {
   const activity = thinkingActivityForMessage(message);
   if (!activity) {
     if (!message.thinkingRedacted) return null;
@@ -308,7 +334,7 @@ function ExpandedThinkingRow({ message }: { message: ChatMessage }) {
     );
   }
 
-  return <ThinkingActivityRow activity={activity} />;
+  return <ThinkingActivityRow activity={activity} hideExcerpt={hideExcerpt} />;
 }
 
 /** 同一个子项渲染器递归服务运行态动作组、完成态内层动作组和外层文字时间线。 */
@@ -316,30 +342,33 @@ function ExpandedWorkGroupChild({
   child,
   toolActivities,
   compact,
+  compactDetails = false,
   pluginUi,
 }: {
   child: WorkGroupChild;
   toolActivities?: ProjectedToolActivity[];
   compact?: boolean;
+  compactDetails?: boolean;
   pluginUi: WorkGroupBlockProps['pluginUi'];
 }) {
   if (child.kind === 'tools') {
     return (
       <>
         {toolActivities?.map((activity) => (
-          <ToolActivityRow key={activity.key} activity={activity} pluginUi={pluginUi} />
+          <ToolActivityRow key={activity.key} activity={activity} pluginUi={pluginUi} compactDetails={compactDetails} />
         ))}
       </>
     );
   }
   if (child.kind === 'thinking') {
-    return <ExpandedThinkingRow message={child.message} />;
+    return <ExpandedThinkingRow message={child.message} hideExcerpt={compactDetails} />;
   }
   if (child.kind === 'group') {
     return (
       <WorkGroupBlock
         pluginUi={pluginUi}
         compact={compact}
+        showLivePreview={!compactDetails}
         blockId={child.blockId}
         durationMs={child.durationMs}
         isStreaming={child.isStreaming}
@@ -476,6 +505,7 @@ function ActivityWorkGroupBlock({
   startedAtMs,
   childItems,
   fitHeader = false,
+  showLivePreview = true,
 }: WorkGroupBlockProps) {
   const { t } = useTranslation();
   const { expanded: rememberedExpanded, setExpanded } = useExpandedBlockMemory(blockId);
@@ -486,7 +516,7 @@ function ActivityWorkGroupBlock({
   deferredRef.current = deferred;
   // A Host that projects running lines makes the folded preview need no detail read.
   // Older Hosts omit them and keep the latest-five detail tail below.
-  const workLines = !compact && isStreaming ? deferred?.lines : undefined;
+  const workLines = showLivePreview && !compact && isStreaming ? deferred?.lines : undefined;
   const lineMode = workLines !== undefined;
   // Register before paint. Switching back to a running task remounts this group;
   // a passive effect can lag 50–300ms behind the stream's mount, showing a
@@ -510,10 +540,10 @@ function ActivityWorkGroupBlock({
   // 多取一条即可判断展开是否能露出更多活动，显示仍只取最近 5 条。
   const recentActivities = useMemo(
     () =>
-      !compact && isStreaming && !lineMode
+      showLivePreview && !compact && isStreaming && !lineMode
         ? projectRecentWorkActivities(childItems, true, MAX_LIVE_WORK_ACTIVITIES + 1)
         : [],
-    [childItems, isStreaming, compact, lineMode],
+    [childItems, isStreaming, compact, lineMode, showLivePreview],
   );
   const liveActivities = useMemo(
     () => recentActivities.slice(-MAX_LIVE_WORK_ACTIVITIES),
@@ -533,6 +563,7 @@ function ActivityWorkGroupBlock({
   );
   // 运行中预览已经等于全部内容时，折叠/展开是视觉空操作 — 组头不提供交互。
   const canToggle =
+    !showLivePreview ||
     compact ||
     lineMode ||
     (!!deferred && !deferred.previewComplete) ||
@@ -544,7 +575,7 @@ function ActivityWorkGroupBlock({
   // The body opens right away (spinner only), so the handoff swaps rows inside an open Collapse.
   const holdLines = effectiveExpanded && deferred?.awaitingDetails === true && !!workLines?.length;
   const isLivePreviewVisible =
-    !compact && isStreaming && (!effectiveExpanded || holdLines)
+    showLivePreview && !compact && isStreaming && (!effectiveExpanded || holdLines)
     && (workLines ? workLines.length > 0 : liveActivities.length > 0);
   // 完成态只计算一次完整摘要；运行态保持折叠时走上面的反向 latest-five
   // 热路径，用户主动展开后才投影全部历史。
@@ -566,6 +597,17 @@ function ActivityWorkGroupBlock({
     setExpanded((v) => !v);
   }, [deferred, setExpanded]);
 
+  // Read the invocation types only. Remote windows can have lightweight
+  // activity records before the full command and result are available.
+  const toolSummary = useMemo(() => {
+    if (showLivePreview || compact) return '';
+    const calls = childItems.flatMap(child => child.kind === 'tools' ? child.toolCalls : []);
+    const tools = calls.length
+      ? calls
+      : deferred?.lines?.filter(line => line.kind === 'tool') ?? [];
+    return tools.length ? formatSummary(aggregateVerbs(tools), t) : '';
+  }, [showLivePreview, compact, childItems, deferred?.lines, t]);
+
   if (childItems.length === 0 && !deferred) return null;
 
   // durationMs === 0(同毫秒时间戳的极短 run)也显示时长 — formatDuration
@@ -578,7 +620,7 @@ function ActivityWorkGroupBlock({
         ? t('chat.workGroup.worked', { duration: formatDuration(durationMs, t) })
         : t('chat.workGroup.workDetails');
   const explorationSummary =
-    !compact && activityProjection?.isPureExploration
+    showLivePreview && !compact && activityProjection?.isPureExploration
       ? [
           activityProjection.explorationCounts.read > 0
             ? t('chat.workGroup.exploration.read', {
@@ -599,9 +641,8 @@ function ActivityWorkGroupBlock({
           .filter((part): part is string => part !== null)
           .join(' · ')
       : '';
-  const summaryText = explorationSummary
-    ? `${baseSummaryText} · ${explorationSummary}`
-    : baseSummaryText;
+  const activitySummary = toolSummary || explorationSummary;
+  const summaryText = activitySummary ? `${baseSummaryText} · ${activitySummary}` : baseSummaryText;
 
   return (
     <div className="flex w-full min-w-0 justify-start">
@@ -690,6 +731,7 @@ function ActivityWorkGroupBlock({
                     pluginUi={pluginUi}
                     child={child}
                     compact={compact}
+                    compactDetails={!showLivePreview}
                     toolActivities={
                       child.kind === 'tools'
                         ? activityProjection?.toolActivitiesByChildKey.get(child.key)

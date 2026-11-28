@@ -6491,6 +6491,7 @@ function CCAgentSessionContent({
       // 伙伴对话:assistant 气泡挂 TA 的头像(普通任务传 null,渲染完全不变)。
       assistantAvatar={botAssistantAvatar}
       simplifiedBotConversation={Boolean(botChatIdentity)}
+      showLiveWorkPreview={Boolean(botChatIdentity || sideChatCreatedAt || session?.source === 'cindy-make')}
       botUnreadBoundaryAt={botChatIdentity ? botUnreadBoundaryAt : null}
       onBotReadThrough={viewVisible ? onBotReadThrough : undefined}
       messages={timelineMessages}

@@ -641,8 +641,8 @@ function buildDiffPayload(
 
   const { filePath, toolName } = descriptor;
   if (toolName === 'Edit') {
-    const o = typeof inp.old_string === 'string' ? inp.old_string : '';
-    const n = typeof inp.new_string === 'string' ? inp.new_string : '';
+    const { old_string: o, new_string: n } = inp;
+    if (typeof o !== 'string' || typeof n !== 'string') return null;
     return {
       kind: 'diff',
       files: [
@@ -657,7 +657,8 @@ function buildDiffPayload(
     };
   }
   if (toolName === 'Write' || toolName === 'write') {
-    const c = typeof inp.content === 'string' ? inp.content : '';
+    const c = inp.content;
+    if (typeof c !== 'string') return null;
     return {
       kind: 'diff',
       files: [
@@ -675,6 +676,7 @@ function buildDiffPayload(
   // 由共享的 piEditReplacements 归一化(只认一种会让另一种退化成空 diff)。
   if (toolName === 'edit') {
     const allEdits = piEditReplacements(inp);
+    if (!allEdits.length) return null;
     const visibleEdits = allEdits.slice(0, DIFF_MAX_SEGMENTS);
     return {
       kind: 'diff',
@@ -704,6 +706,7 @@ function buildDiffPayload(
   }
   if (toolName === 'MultiEdit') {
     const allEdits = Array.isArray(inp.edits) ? inp.edits : [];
+    if (!allEdits.length) return null;
     const edits = allEdits.slice(0, DIFF_MAX_SEGMENTS);
     return {
       kind: 'diff',
@@ -746,6 +749,8 @@ export interface AgentActionRowProps {
   toolResult?: string;
   /** 工作过程展开 / live preview 使用：仅无法识别的命令另显原文兜底。 */
   showRawCommand?: boolean;
+  /** Keep invocation details in the individual tool disclosure. */
+  compactDetails?: boolean;
   /** Codex 一个 commandExecution 拆出的结构化展示子动作。 */
   intentOverride?: CommandIntent;
   /**
@@ -795,6 +800,7 @@ export function AgentActionRow({
   message,
   toolResult,
   showRawCommand = false,
+  compactDetails = false,
   intentOverride,
   status = 'done',
   descriptorOverride,
@@ -853,7 +859,7 @@ export function AgentActionRow({
   // command 类带模型 description 时,description 自含动词语义("查看工作区
   // 状态"),再渲染英文动词 label 会变成"Ran 查看工作区状态"的中英混排 —
   // 隐藏动词,让 description 独立成句(Claude App 同款形态)。
-  const hideVerb = descriptor.kind === 'command' && !!descriptor.description;
+  const hideVerb = !compactDetails && descriptor.kind === 'command' && !!descriptor.description;
   // command intent(codex commandActions / 本地规则解析)命中时,动词换成意图
   // 动词("读取"/"运行测试"),否则走工具名静态映射。description 存在时 intent
   // 不参与(hideVerb 已隐藏动词)。
@@ -865,7 +871,7 @@ export function AgentActionRow({
     descriptor.kind === 'command' &&
     !descriptor.description &&
     !descriptor.intent &&
-    showRawCommand;
+    (showRawCommand || compactDetails);
   const verbLabel = t(
     intentAction
       ? verbLabelKeyForIntent(intentAction)
@@ -878,15 +884,17 @@ export function AgentActionRow({
   // 意识行动词固定"召唤意识"(与其它工具的 Ran/Read 语系并列)。
   const rowVerbLabel = ghostInfo ? t('chat.ghostCall.verb') : verbLabel;
   const displayParam = useMemo(
-    () => extractDisplayParam(descriptor, { hideRawCommandFallback: showRawCommand }),
-    [descriptor, showRawCommand],
+    () => compactDetails && descriptor.kind !== 'file' && descriptor.kind !== 'fileChange'
+      ? null
+      : extractDisplayParam(descriptor, { hideRawCommandFallback: showRawCommand }),
+    [descriptor, showRawCommand, compactDetails],
   );
   const fileChangeCountText =
     isFileChange && descriptor.changes.length > 1
       ? t('chat.agentActionRow.fileChange.files', { count: descriptor.changes.length })
       : null;
   const rawCommand =
-    showRawCommand &&
+    showRawCommand && !compactDetails &&
     descriptor.kind === 'command' &&
     !descriptor.description &&
     !descriptor.intent &&
@@ -955,7 +963,7 @@ export function AgentActionRow({
     isFileChange && descriptor.changes.length === 1 ? descriptor.changes[0] : null;
   const chipFilePath = filePath || singleFileChange?.movePath || singleFileChange?.path || '';
   // v10:命令类工具走就地展开；Claude/Codex 文件编辑统一走 diff lightbox。
-  const isInlineExpand = !isFilePathTool && !isFileChange;
+  const isInlineExpand = !(isFilePathTool && filePath) && !isFileChange;
 
   const [lightbox, setLightbox] = useState<LightboxState>({ kind: 'none' });
   const [expanded, setExpanded] = useState(false);
@@ -980,6 +988,10 @@ export function AgentActionRow({
       onActivateOverride();
       return;
     }
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
     const diffPayload = buildDiffPayload(descriptor, inp, asyncDiff ?? syncDiff);
     if (diffPayload) {
       triggerRef.current = anchor;
@@ -993,10 +1005,6 @@ export function AgentActionRow({
       } else {
         setLightbox({ kind: 'payload', payload: diffPayload });
       }
-      return;
-    }
-    if (isInlineExpand) {
-      setExpanded((prev) => !prev);
       return;
     }
     triggerRef.current = anchor;
@@ -1021,7 +1029,10 @@ export function AgentActionRow({
           setLightbox({ kind: 'image', src });
         }
       } else {
-        if (!(await shouldOpenTextLightboxForOrigin(fileCtx, absPath))) return;
+        if (!(await shouldOpenTextLightboxForOrigin(fileCtx, absPath))) {
+          setExpanded(true);
+          return;
+        }
         if (previewHost) {
           previewHost.open({
             kind: 'document',
@@ -1036,17 +1047,16 @@ export function AgentActionRow({
       }
       return;
     }
-    // 兜底:文件类工具但拿不到 file_path 时,降级走就地展开 — 不再无意义
-    // 地把 JSON 塞进全屏 lightbox。
-    setExpanded((prev) => !prev);
+    // 没有可打开的原文件或改动内容时，仍可就地查看调用记录。
+    setExpanded(true);
   };
 
   const closeLightbox = () => setLightbox({ kind: 'none' });
 
   // 就地展开时要展示的 input 文本(已按 tool 名做了人类可读的格式化)。
   const inlineInputText = useMemo(
-    () => (isInlineExpand ? formatInlineInput(toolName, inp) : ''),
-    [isInlineExpand, toolName, inp],
+    () => (expanded ? formatInlineInput(toolName, inp) : ''),
+    [expanded, toolName, inp],
   );
 
   // v12: 文件 chip 右键菜单 (复制 / 复制文件路径 / 打开文件所在目录)。
@@ -1152,7 +1162,7 @@ export function AgentActionRow({
         }}
         onContextMenu={onRowContextMenu}
         onKeyDown={onRowKeyDown}
-        aria-expanded={isInlineExpand && !onActivateOverride ? expanded : undefined}
+        aria-expanded={(isInlineExpand || expanded) && !onActivateOverride ? expanded : undefined}
         aria-label={
           ghostInfo
             ? `${rowVerbLabel} ${ghostInfo.name} ${ghostInfo.tool}`
@@ -1203,7 +1213,7 @@ export function AgentActionRow({
         {/* v9: 移除 chevron 上的"查看详情" Tooltip。整行 button 已经是
             统一激活目标，末尾 chevron 只保留视觉提示。 */}
         <span aria-hidden="true" className={ACTIVITY_ROW_CHEVRON_SLOT_CLASS}>
-          {isInlineExpand && expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </button>
       {rawCommand && !expanded && (
@@ -1234,7 +1244,7 @@ export function AgentActionRow({
       {renderPluginUiBody(pluginUi.toolBody ? { position: 'tool.body', sessionId: fileCtx.sessionId, clientId: message.clientId, tool: toolName,
         disabled: isRemoteFileOrigin(fileCtx.origin), plugin: message.sourcePlugin?.pluginId,
         context: () => ({ tool: { clientId: message.clientId, name: toolName, input: message.toolInput, result: toolResult, status } }) } : undefined,
-      isInlineExpand && expanded && (
+      expanded && (
         <div
           // 行按钮本身是 select-none,这里必须显式 select-text,让用户能复制
           // grep pattern、bash command 这种关键文本。

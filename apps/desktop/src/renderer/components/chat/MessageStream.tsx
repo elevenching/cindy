@@ -509,6 +509,7 @@ interface MessageStreamProps {
   assistantAvatar?: ReactNode;
   /** 伙伴专属轻量时间线：隐藏内部工作卡，只保留单一运行状态与分组时间。 */
   simplifiedBotConversation?: boolean;
+  showLiveWorkPreview?: boolean;
   /** Bot read position captured before entry marks the conversation read. */
   botUnreadBoundaryAt?: number | null;
   onBotReadThrough?: (at: number) => void;
@@ -3165,6 +3166,7 @@ export const WorkGroupRenderItemView = memo(function WorkGroupRenderItemView({
   companionAvatar,
   startsUnread = false,
   groupTimestamp,
+  showLivePreview,
 }: {
   item: Extract<RenderItem, { type: 'work_group' }>;
   context: WorkGroupRenderContext;
@@ -3173,6 +3175,7 @@ export const WorkGroupRenderItemView = memo(function WorkGroupRenderItemView({
   companionAvatar?: ReactNode;
   startsUnread?: boolean;
   groupTimestamp?: number;
+  showLivePreview?: boolean;
 }) {
   // 完成态外层时间线可包含内层 work_group。递归只负责形状映射,
   // 具体折叠 / 直接详情逻辑全部复用 WorkGroupBlock。
@@ -3221,6 +3224,7 @@ export const WorkGroupRenderItemView = memo(function WorkGroupRenderItemView({
       compact={compact}
       deferred={item.deferred}
       fitHeader={Boolean(companionAvatar)}
+      showLivePreview={showLivePreview}
       journal={item.teammateJournal}
       journalTitle={item.isStreaming ? (elapsed) => (
               <TeammateProcessStatus sessionId={context.sessionId}>{elapsed}</TeammateProcessStatus>
@@ -3266,6 +3270,7 @@ export function MessageStream({
   workingDir,
   assistantAvatar,
   simplifiedBotConversation = false,
+  showLiveWorkPreview = true,
   botUnreadBoundaryAt = null,
   onBotReadThrough,
   messages,
@@ -7083,8 +7088,7 @@ export function MessageStream({
                           context={workGroupRenderContext}
                           startsUnread={botUnreadBoundaryKey === item.key}
                           groupTimestamp={botTimeGroupsByRow.get(item.key)}
-                          // 伙伴聊天与普通任务同一套工作过程：运行中露最近 5 条活动与计时，
-                          // 组头按内容宽；最终答复后保留折叠过程，按需展开。
+                          showLivePreview={showLiveWorkPreview}
                           compact={false}
                           companionAvatar={simplifiedBotConversation
                             ? botContinuationKeys.has(item.key) ? botReplyColumnSpacer : assistantAvatar

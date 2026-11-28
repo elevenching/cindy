@@ -225,6 +225,50 @@ describe('document tool result presentation', () => {
 });
 
 describe('AgentActionRow — 行主文案', () => {
+  // Unit: the first disclosure in a regular task used to leak a raw, unclassified
+  // command. A single command with a result covers the second disclosure too.
+  it('shows only an action until the user opens a compact command row', () => {
+    const command = 'docker ps';
+    render(createElement(AgentActionRow, {
+      pluginUi: EMPTY_PLUGIN_UI_MESSAGE_CANDIDATES,
+      message: mkTool('compact-command', 'exec', { command }),
+      toolResult: 'Command output',
+      compactDetails: true,
+    }));
+
+    const action = screen.getByRole('button', { name: 'chat.agentActionRow.verb.ranCommand' });
+    expect(screen.queryByText(command)).toBeNull();
+    expect(screen.queryByText('Command output')).toBeNull();
+    fireEvent.click(action);
+    expect(screen.getByText(command)).toBeTruthy();
+    expect(screen.getByText('Command output')).toBeTruthy();
+  });
+
+  // Unit: incomplete file records used to open a blank diff or leave the row
+  // unchanged. The stored result must stay readable without a file viewer.
+  it.each([
+    ['Read', {}, 'File path missing'],
+    ['Edit', { file_path: '/repo/example.ts' }, 'Edit details missing'],
+    ['Write', { file_path: '/repo/example.ts' }, 'Write details missing'],
+    ['Grep', { pattern: 'needle' }, 'Search result'],
+    ['WebFetch', { url: 'https://example.com' }, 'Web result'],
+    ['mcp__example__lookup', { query: 'needle' }, 'Plugin result'],
+  ])('can open the stored %s record inline', (tool, input, result) => {
+    render(createElement(AgentActionRow, {
+      pluginUi: EMPTY_PLUGIN_UI_MESSAGE_CANDIDATES,
+      message: mkTool('open-record', tool, input),
+      toolResult: result,
+      compactDetails: true,
+    }));
+    const action = screen.getByRole('button');
+    expect(screen.queryByText(result)).toBeNull();
+    fireEvent.click(action);
+    expect(action.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText(result)).toBeTruthy();
+    fireEvent.click(action);
+    expect(screen.queryByText(result)).toBeNull();
+  });
+
   it('Bash 有 description:显示描述、隐藏动词、hover title 为命令原文', () => {
     render(
       createElement(AgentActionRow, { pluginUi: EMPTY_PLUGIN_UI_MESSAGE_CANDIDATES,

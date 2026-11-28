@@ -22,6 +22,7 @@ vi.mock('@/components/chat/AgentActionRow', () => ({
   AgentActionRow: (props: {
     message: ChatMessage;
     showRawCommand?: boolean;
+    compactDetails?: boolean;
     status?: 'running' | 'done';
     toolResult?: string;
     intentOverride?: { action: string; target?: string };
@@ -44,7 +45,7 @@ vi.mock('@/components/chat/AgentActionRow', () => ({
         'aria-label': `chat.agentActionRow.status.${props.status ?? 'done'}`,
         onClick: props.onActivateOverride,
       },
-      command,
+      props.compactDetails ? 'Tool action' : command,
     );
   },
 }));
@@ -443,6 +444,39 @@ describe('WorkGroupBlock — running latest-five preview', () => {
     expect(screen.getByText(/chat\.workGroup\.exploration\.search:1/)).toBeTruthy();
   });
 
+  // Unit: regular task disclosure must remain usable even when a single activity
+  // fitted the previous preview. Existing live-preview cases exercise the opt-in rows.
+  it('keeps a short running task collapsed until the user opens its work', async () => {
+    render(createElement(WorkGroupBlock, {
+      pluginUi: EMPTY_PLUGIN_UI_MESSAGE_CANDIDATES,
+      blockId: 'work:quiet-task',
+      isStreaming: true,
+      showLivePreview: false,
+      childItems: [
+        tools('seg-1', [mkTool('t1', 'git status')], new Map([['t1', 'clean']])),
+        thinking(mkThinking('th1', 'Checking the repository')),
+      ],
+    }));
+
+    const toggle = screen.getByRole('button', { name: 'chat.workGroup.working · Chat.agentActions.part.ran:1' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('direct-tool')).toBeNull();
+    expect(screen.queryByText('Checking the repository')).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('Tool action').getAttribute('data-result')).toBe('clean');
+    expect(screen.queryByText('git status')).toBeNull();
+    expect(screen.queryByText('Checking the repository')).toBeNull();
+    const thought = await screen.findByRole('button', { name: 'chat.teammateProcess.thought' });
+    fireEvent.click(thought);
+    expect(thought.getAttribute('aria-expanded')).toBe('true');
+    const body = screen.getByText('Checking the repository');
+    expect(thought.contains(body)).toBe(false);
+    fireEvent.click(thought);
+    expect(thought.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('offers no toggle while running when the preview already shows everything', () => {
     const childItems = [
       tools('seg-1', [mkTool('t1', 'git status')]),
@@ -775,6 +809,25 @@ describe('WorkGroupBlock — Host-projected running lines', () => {
     toggle: vi.fn(), retry: vi.fn(), setVisible: vi.fn(), ...(lines ? { lines } : {}),
   });
   const placeholder = thinking({ ...mkThinking('placeholder', ''), thinkingRedacted: true });
+
+  // Unit: a remote Host can send thinking preview lines before detail hydration.
+  // The quiet task header must still open the real detail range without showing those lines.
+  it('hides remote preview lines but requests full details on expansion', () => {
+    const remote = deferred([{ kind: 'thinking', key: 'c1', text: 'Remote preview' }]);
+    render(createElement(WorkGroupBlock, {
+      pluginUi: EMPTY_PLUGIN_UI_MESSAGE_CANDIDATES,
+      blockId: 'work:quiet-remote',
+      isStreaming: true,
+      showLivePreview: false,
+      childItems: [],
+      deferred: { ...remote, awaitingDetails: true },
+    }));
+
+    expect(screen.queryByText('Remote preview')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'chat.workGroup.working' }));
+    expect(remote.setVisible).toHaveBeenLastCalledWith(true, true);
+    expect(screen.queryByText('Remote preview')).toBeNull();
+  });
 
   it('renders Host lines, and a line opens the group', () => {
     const remote = deferred([
